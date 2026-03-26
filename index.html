@@ -5,116 +5,85 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fill-in-the-Blanks Word Finder</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style type="text/css">
+    <script src="wordlist.js"></script>
+    <style>
+        /* Letter boxes: fluid grid — all boxes in one row */
+        #letterBoxes {
+            display: grid;
+            gap: 4px;
+            width: 100%;
+        }
         .letter-box {
-            width: 3rem;
-            height: 3rem;
-            font-size: 1.5rem;
+            width: 100%;
+            aspect-ratio: 1;
             font-weight: bold;
             border: 2px solid #d1d5db;
-            border-radius: 0.5rem;
+            border-radius: 0.4rem;
             background-color: #f9fafb;
             cursor: pointer;
             transition: all 0.2s;
+            font-size: clamp(0.65rem, 4vw, 1.4rem);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
         }
-        
-        // Load word list from text file
-        async function loadWordList() {
-            try {
-                const response = await fetch('wordlist.txt');
-                if (!response.ok) throw new Error('Could not load word list');
-                const text = await response.text();
-                wordList = text
-                    .split(/\r?\n/)
-                    .map(w => w.trim().toLowerCase())
-                    .filter(w => w.length > 0 && /^[a-z]+$/.test(w));
-                wordList = [...new Set(wordList)];
-                document.getElementById('wordCount').textContent = wordList.length.toLocaleString();
-            } catch (err) {
-                console.error('Error loading word list:', err);
-                document.getElementById('wordCount').textContent = '0 (load local file)';
-                const localUI = document.getElementById('localLoad');
-                if (localUI) localUI.classList.remove('hidden');
-            }
-            updateResults();
-        }
+        .letter-box:hover  { border-color: #818cf8; }
+        .letter-box.active { border-color: #4f46e5; background-color: #eef2ff; }
+        .letter-box.filled { border-color: #9ca3af; background-color: white; }
 
-        // Handle loading wordlist from a user-selected local file (works when opened via file://)
-        function handleLocalFile(file) {
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const text = e.target.result;
-                wordList = text
-                    .split(/\r?\n/)
-                    .map(w => w.trim().toLowerCase())
-                    .filter(w => w.length > 0 && /^[a-z]+$/.test(w));
-                wordList = [...new Set(wordList)];
-                document.getElementById('wordCount').textContent = wordList.length.toLocaleString() + ' (local)';
-                document.getElementById('localLoad').classList.add('hidden');
-                updateResults();
-            };
-            reader.onerror = () => {
-                alert('Failed to read the selected file.');
-            };
-            reader.readAsText(file);
+        .clear-btn {
+            position: absolute;
+            top: -6px; right: -6px;
+            width: 16px; height: 16px;
+            background: #ef4444;
+            color: white;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px;
+            cursor: pointer;
+            border: none;
+            line-height: 1;
         }
-        .letter-box:hover {
-            border-color: #818cf8;
-        }
-        .letter-box.active {
-            border-color: #4f46e5;
-            background-color: #eef2ff;
-        }
-        .letter-box.filled {
-            border-color: #9ca3af;
-            background-color: white;
-        }
+        .clear-btn:hover { background: #dc2626; }
+
         .keyboard-btn {
-            width: 2.5rem;
-            height: 2.5rem;
             border: 2px solid #d1d5db;
-            border-radius: 0.5rem;
+            border-radius: 0.4rem;
             background-color: white;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s;
+            padding: 0;
+            aspect-ratio: 1;
+            width: 100%;
+            font-size: clamp(0.6rem, 3vw, 1rem);
         }
-        .keyboard-btn:hover {
-            border-color: #4f46e5;
-            background-color: #eef2ff;
-        }
-        /* Block highlight colors (up to 9) */
-        .block-color-0 { background-color: #fde68a; } /* amber-300 */
-        .block-color-1 { background-color: #bbf7d0; } /* green-200 */
-        .block-color-2 { background-color: #bfdbfe; } /* blue-200 */
-        .block-color-3 { background-color: #fbcfe8; } /* pink-200 */
-        .block-color-4 { background-color: #c7d2fe; } /* indigo-200 */
-        .block-color-5 { background-color: #fecaca; } /* red-200 */
-        .block-color-6 { background-color: #fef3c7; } /* yellow-100 */
-        .block-color-7 { background-color: #d1fae5; } /* emerald-100 */
-        .block-color-8 { background-color: #e9d5ff; } /* purple-100 */
-        .block-span { padding: 0 0.25rem; border-radius: 0.35rem; display: inline-block; }
+        .keyboard-btn:hover { border-color: #4f46e5; background-color: #eef2ff; }
+
+        .block-color-0 { background-color: #fde68a; }
+        .block-color-1 { background-color: #bbf7d0; }
+        .block-color-2 { background-color: #bfdbfe; }
+        .block-color-3 { background-color: #fbcfe8; }
+        .block-color-4 { background-color: #c7d2fe; }
+        .block-color-5 { background-color: #fecaca; }
+        .block-color-6 { background-color: #fef3c7; }
+        .block-color-7 { background-color: #d1fae5; }
+        .block-color-8 { background-color: #e9d5ff; }
+        .block-span { padding: 0 0.2rem; border-radius: 0.3rem; display: inline-block; }
     </style>
 </head>
-<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-6">
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-3 sm:p-6">
     <div class="max-w-6xl mx-auto">
-        <div class="bg-white rounded-xl shadow-xl p-8">
-            <h1 class="text-4xl font-bold text-indigo-700 mb-2">Fill-in-the-Blanks Search</h1>
-            <p class="text-gray-600 mb-2">Click boxes to enter letters, or filter by required letter blocks</p>
-            <p class="text-sm text-gray-500 mb-8">Dictionary: <span id="wordCount">Loading...</span> words</p>
-            <div id="localLoad" class="mb-4 hidden">
-                <p class="text-sm text-red-600 mb-2">Unable to load <code>wordlist.txt</code> due to local file restrictions. You can load it manually:</p>
-                <div class="flex items-center gap-2">
-                    <input id="fileInput" type="file" accept=".txt" class="px-3 py-2 border-2 border-gray-300 rounded-lg bg-white" />
-                    <button id="loadFromFile" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">Load Selected File</button>
-                </div>
-            </div>
+        <div class="bg-white rounded-xl shadow-xl p-4 sm:p-8">
+            <h1 class="text-2xl sm:text-4xl font-bold text-indigo-700 mb-1">Fill-in-the-Blanks Search</h1>
+            <p class="text-sm text-gray-600 mb-1">Click boxes to enter letters, or filter by required letter blocks</p>
+            <p class="text-xs text-gray-500 mb-5">Dictionary: <span id="wordCount">Loading...</span> words</p>
 
             <!-- Word Length Selector -->
-            <div class="mb-6">
-                <label class="block text-sm font-semibold text-gray-700 mb-3">Number of Letters</label>
-                <select id="wordLength" class="px-4 py-2 text-lg border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none bg-white">
+            <div class="mb-5">
+                <label class="block text-sm font-semibold text-gray-700 mb-2">Number of Letters</label>
+                <select id="wordLength" class="w-full sm:w-auto px-3 py-2 text-base border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none bg-white">
                     <option value="2">2 Letters</option>
                     <option value="3">3 Letters</option>
                     <option value="4">4 Letters</option>
@@ -133,42 +102,41 @@
             </div>
 
             <!-- Letter Boxes -->
-            <div class="mb-8">
-                <div class="flex items-center justify-between mb-3">
-                    <label class="block text-sm font-semibold text-gray-700">Fill in the blanks (click a box to enter a letter)</label>
+            <div class="mb-6">
+                <div class="flex items-center justify-between mb-2">
+                    <label class="block text-sm font-semibold text-gray-700">Fill in the blanks</label>
                     <button id="clearAll" class="text-sm text-red-600 hover:text-red-700 font-medium hidden">Clear All</button>
                 </div>
-                <div id="letterBoxes" class="flex flex-wrap gap-2 mb-4"></div>
-                
-                <!-- Keyboard Input -->
-                <div id="keyboard" class="p-4 bg-indigo-50 rounded-lg border-2 border-indigo-200 hidden">
-                    <p class="text-sm font-medium text-gray-700 mb-2">Enter letter for position <span id="activePosition"></span>:</p>
-                    <div id="keyboardButtons" class="grid grid-cols-9 gap-2"></div>
+                <div id="letterBoxes" class="mb-3"></div>
+
+                <!-- On-screen keyboard -->
+                <div id="keyboard" class="p-3 bg-indigo-50 rounded-lg border-2 border-indigo-200 hidden">
+                    <p class="text-xs font-medium text-gray-700 mb-2">Enter letter for position <span id="activePosition"></span>:</p>
+                    <div id="keyboardButtons" style="display:grid; grid-template-columns: repeat(9,1fr); gap:4px;"></div>
                 </div>
             </div>
 
             <!-- Required Letter Blocks -->
-            <div class="mb-6 p-4 bg-gray-50 rounded-lg">
-                <label class="block text-sm font-semibold text-gray-700 mb-3">Required Letter Blocks (optional - filter results by blocks like "ail" or "v")</label>
-                <div class="flex gap-2 mb-3">
-                    <input type="text" id="blockInput" placeholder="e.g., ail, v, able" class="flex-1 px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none">
-                    <button id="addBlock" class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">Add Block</button>
+            <div class="mb-5 p-3 bg-gray-50 rounded-lg">
+                <label class="block text-sm font-semibold text-gray-700 mb-2">Required Letter Blocks <span class="font-normal text-gray-400">(optional)</span></label>
+                <div class="flex gap-2 mb-3 w-full">
+                    <input type="text" id="blockInput" placeholder='e.g. ail, v, able'
+                           class="flex-1 min-w-0 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none text-sm">
+                    <button id="addBlock" class="shrink-0 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium">Add</button>
                 </div>
                 <div id="blocksList" class="flex flex-wrap gap-2"></div>
             </div>
 
             <!-- Results -->
-            <div class="mt-8">
-                <div class="flex items-center justify-between mb-4">
-                    <h2 class="text-2xl font-bold text-gray-800">
-                        <svg class="inline mr-2 w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+            <div class="mt-6">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-xl sm:text-2xl font-bold text-gray-800">
                         Results
-                        <span class="text-lg font-normal text-gray-500 ml-2">(<span id="resultCount">0</span> <span id="resultWord">words</span>)</span>
+                        <span class="text-base font-normal text-gray-500 ml-1">(<span id="resultCount">0</span> <span id="resultWord">words</span>)</span>
                     </h2>
                 </div>
-                
-                <div id="resultsContainer" class="text-center py-12 bg-gray-50 rounded-lg border-2 border-gray-200">
-                    <p class="text-gray-400">Click boxes above to start searching for words</p>
+                <div id="resultsContainer" class="text-center py-10 bg-gray-50 rounded-lg border-2 border-gray-200">
+                    <p class="text-gray-400 text-sm">Click boxes above to start searching</p>
                 </div>
             </div>
         </div>
@@ -177,113 +145,101 @@
     <script>
         let wordList = [];
         let letterBoxes = [];
-        // requiredBlocks holds objects { id: string, text: string } to allow duplicates
         let requiredBlocks = [];
         let _blockIdCounter = 0;
         let activeBox = null;
         let wordLength = 9;
 
-        // Initialize letter boxes (DOM + state)
+        function initWordList() {
+            if (typeof WORD_LIST !== 'undefined') {
+                wordList = WORD_LIST;
+            } else {
+                console.error('wordlist.js not loaded — WORD_LIST is undefined');
+            }
+            document.getElementById('wordCount').textContent = wordList.length.toLocaleString();
+            updateResults();
+        }
+
+        function setBoxGridColumns() {
+            document.getElementById('letterBoxes').style.gridTemplateColumns = `repeat(${wordLength}, 1fr)`;
+        }
+
         function initializeBoxes() {
             const container = document.getElementById('letterBoxes');
             container.innerHTML = '';
             letterBoxes = Array(wordLength).fill('');
+            setBoxGridColumns();
             for (let i = 0; i < wordLength; i++) {
-                const boxWrap = document.createElement('div');
-                boxWrap.className = 'relative';
-                boxWrap.innerHTML = `<button class="letter-box" data-index="${i}"></button>`;
-                container.appendChild(boxWrap);
+                const wrap = document.createElement('div');
+                wrap.className = 'relative';
+                wrap.style.minWidth = '0';
+                wrap.innerHTML = `<button class="letter-box" data-index="${i}"></button>`;
+                container.appendChild(wrap);
             }
-            document.querySelectorAll('.letter-box').forEach((box, index) => {
-                box.addEventListener('click', () => handleBoxClick(index));
+            document.querySelectorAll('.letter-box').forEach((box, i) => {
+                box.addEventListener('click', () => handleBoxClick(i));
             });
             activeBox = null;
             updateBoxDisplay();
             updateBoxStyles();
             updateKeyboard();
         }
-        // Update results
+
         function updateResults() {
-            const pattern = letterBoxes.map(letter => letter === '' ? '.' : letter.toLowerCase()).join('');
+            const pattern = letterBoxes.map(l => l === '' ? '.' : l.toLowerCase()).join('');
             const patternRegex = new RegExp('^' + pattern + '$');
 
-            // For each word that matches the pattern, compute the best non-overlapping placement
-            // of the required blocks (they only highlight and determine sort order now).
-            // Returns object { placements: [ {blockIndex, start, length} ], count, totalLength }
             function matchBlocksForWord(word, blocks) {
                 if (!blocks || blocks.length === 0) return { placements: [], count: 0, totalLength: 0 };
-                // compute candidate start positions for each block (reject overlaps with filled boxes)
                 const positions = blocks.map(block => {
                     const starts = [];
                     const bl = block.length;
                     for (let i = 0; i <= word.length - bl; i++) {
                         if (word.substr(i, bl) !== block) continue;
-                        // block must fit only on blank positions (no filled letter boxes)
-                        let intersectsFilled = false;
+                        let hit = false;
                         for (let k = i; k < i + bl; k++) {
-                            if (letterBoxes[k] && letterBoxes[k] !== '') { intersectsFilled = true; break; }
+                            if (letterBoxes[k] && letterBoxes[k] !== '') { hit = true; break; }
                         }
-                        if (!intersectsFilled) starts.push(i);
+                        if (!hit) starts.push(i);
                     }
                     return starts;
                 });
-
-                // If none of the blocks have any candidate positions, return empty
                 if (positions.every(p => p.length === 0)) return { placements: [], count: 0, totalLength: 0 };
-
-                // We'll search for the maximal set of non-overlapping placements.
                 const n = blocks.length;
-                // order indices by block length desc (prefer placing longer blocks first) and then fewest candidates
                 const order = Array.from({ length: n }, (_, i) => i)
                     .sort((a, b) => {
                         const la = blocks[a].length, lb = blocks[b].length;
-                        if (lb !== la) return lb - la; // longer first
+                        if (lb !== la) return lb - la;
                         return positions[a].length - positions[b].length;
                     });
-
                 let best = { placements: [], count: 0, totalLength: 0 };
                 const used = [];
-
                 function overlapsRange(s, e) {
-                    for (const u of used) {
-                        if (!(e < u.start || s > u.end)) return true;
-                    }
+                    for (const u of used) { if (!(e < u.start || s > u.end)) return true; }
                     return false;
                 }
-
-                // backtracking try to include placements for blocks in order; also try skipping block
-                function backtrack(idx, curPlacements, curTotalLength) {
+                function backtrack(idx, cur, curLen) {
                     if (idx === order.length) {
-                        const curCount = curPlacements.length;
-                        if (curCount > best.count || (curCount === best.count && curTotalLength > best.totalLength)) {
-                            best = { placements: curPlacements.slice(), count: curCount, totalLength: curTotalLength };
-                        }
+                        if (cur.length > best.count || (cur.length === best.count && curLen > best.totalLength))
+                            best = { placements: cur.slice(), count: cur.length, totalLength: curLen };
                         return;
                     }
                     const bi = order[idx];
                     const bl = blocks[bi].length;
-                    const cand = positions[bi];
-
-                    // try all candidate starts
-                    for (const s of cand) {
+                    for (const s of positions[bi]) {
                         const e = s + bl - 1;
                         if (overlapsRange(s, e)) continue;
                         used.push({ start: s, end: e });
-                        curPlacements.push({ blockIndex: bi, start: s, length: bl });
-                        backtrack(idx + 1, curPlacements, curTotalLength + bl);
-                        curPlacements.pop();
-                        used.pop();
+                        cur.push({ blockIndex: bi, start: s, length: bl });
+                        backtrack(idx + 1, cur, curLen + bl);
+                        cur.pop(); used.pop();
                     }
-
-                    // also try skipping this block
-                    backtrack(idx + 1, curPlacements, curTotalLength);
+                    backtrack(idx + 1, cur, curLen);
                 }
-
                 backtrack(0, [], 0);
                 return best;
             }
 
-            // Build results array with match info and then sort by matches (desc) and totalLength (desc)
             const resultsWithMeta = wordList.reduce((acc, word) => {
                 if (word.length !== wordLength) return acc;
                 if (!patternRegex.test(word)) return acc;
@@ -301,48 +257,37 @@
             });
 
             const container = document.getElementById('resultsContainer');
-            const resultCount = document.getElementById('resultCount');
-            const resultWord = document.getElementById('resultWord');
-
-            resultCount.textContent = resultsWithMeta.length;
-            resultWord.textContent = resultsWithMeta.length === 1 ? 'word' : 'words';
+            document.getElementById('resultCount').textContent = resultsWithMeta.length;
+            document.getElementById('resultWord').textContent = resultsWithMeta.length === 1 ? 'word' : 'words';
 
             if (resultsWithMeta.length > 0) {
-                container.className = 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-96 overflow-y-auto p-4 bg-gray-50 rounded-lg border-2 border-gray-200';
+                container.className = 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 max-h-96 overflow-y-auto p-3 bg-gray-50 rounded-lg border-2 border-gray-200';
                 container.innerHTML = resultsWithMeta.map(item => {
                     const w = item.word;
-                    // build char-level color map from placements
                     const colorMap = Array(w.length).fill(null);
                     for (const p of item.match.placements) {
-                        const colorIndex = p.blockIndex % 9;
-                        for (let i = p.start; i < p.start + p.length; i++) colorMap[i] = colorIndex;
+                        const ci = p.blockIndex % 9;
+                        for (let i = p.start; i < p.start + p.length; i++) colorMap[i] = ci;
                     }
-                    // build html with spans
                     let html = '';
                     for (let i = 0; i < w.length; i++) {
-                        const ch = w[i];
                         const ci = colorMap[i];
-                        if (ci === null) {
-                            html += `<span>${ch}</span>`;
-                        } else {
-                            html += `<span class="block-span block-color-${ci}">${ch}</span>`;
-                        }
+                        html += ci === null
+                            ? `<span>${w[i]}</span>`
+                            : `<span class="block-span block-color-${ci}">${w[i]}</span>`;
                     }
-                    return `<div class="px-4 py-2 bg-white border-2 border-gray-200 rounded-lg text-center font-medium text-gray-700 hover:border-indigo-400 hover:shadow-md transition">${html}</div>`;
+                    return `<div class="px-2 py-2 bg-white border-2 border-gray-200 rounded-lg text-center font-medium text-gray-700 hover:border-indigo-400 hover:shadow-md transition text-sm sm:text-base">${html}</div>`;
                 }).join('');
             } else {
-                container.className = 'text-center py-12 bg-gray-50 rounded-lg border-2 border-gray-200';
-                const hasInput = letterBoxes.some(box => box !== '') || requiredBlocks.length > 0;
-                container.innerHTML = `<p class="text-gray-400">${hasInput ? 'No words found matching your pattern' : 'Click boxes above to start searching for words'}</p>`;
+                container.className = 'text-center py-10 bg-gray-50 rounded-lg border-2 border-gray-200';
+                const hasInput = letterBoxes.some(b => b !== '') || requiredBlocks.length > 0;
+                container.innerHTML = `<p class="text-gray-400 text-sm">${hasInput ? 'No words found matching your pattern' : 'Click boxes above to start searching'}</p>`;
             }
         }
 
-        // Initialize keyboard
         function initializeKeyboard() {
             const container = document.getElementById('keyboardButtons');
-            const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-            
-            for (let letter of letters) {
+            for (const letter of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
                 const btn = document.createElement('button');
                 btn.className = 'keyboard-btn';
                 btn.textContent = letter;
@@ -351,23 +296,18 @@
             }
         }
 
-        // Handle box click
         function handleBoxClick(index) {
             activeBox = activeBox === index ? null : index;
             updateBoxStyles();
             updateKeyboard();
         }
 
-        // Handle letter input
         function handleLetterInput(letter) {
             if (activeBox !== null) {
                 letterBoxes[activeBox] = letter;
                 updateBoxDisplay();
-                
-                // Move to next empty box
-                const nextEmpty = letterBoxes.findIndex((box, i) => i > activeBox && box === '');
+                const nextEmpty = letterBoxes.findIndex((b, i) => i > activeBox && b === '');
                 activeBox = nextEmpty !== -1 ? nextEmpty : null;
-                
                 updateBoxStyles();
                 updateKeyboard();
                 updateResults();
@@ -375,7 +315,6 @@
             }
         }
 
-        // Clear a box
         function clearBox(index) {
             letterBoxes[index] = '';
             updateBoxDisplay();
@@ -383,7 +322,6 @@
             updateClearButton();
         }
 
-        // Clear all boxes
         function clearAllBoxes() {
             letterBoxes = Array(wordLength).fill('');
             activeBox = null;
@@ -394,244 +332,126 @@
             updateClearButton();
         }
 
-        // Update box display
         function updateBoxDisplay() {
             document.querySelectorAll('.letter-box').forEach((box, index) => {
                 const parent = box.parentElement;
                 const letter = letterBoxes[index];
-                
                 box.textContent = letter;
-                box.className = `letter-box ${letter ? 'filled' : ''}`;
-                
-                // Remove existing clear button
-                const existingClear = parent.querySelector('.clear-btn');
-                if (existingClear) existingClear.remove();
-                
-                // Add clear button if letter exists
+                box.className = `letter-box${letter ? ' filled' : ''}`;
+                const existing = parent.querySelector('.clear-btn');
+                if (existing) existing.remove();
                 if (letter) {
-                    const clearBtn = document.createElement('button');
-                    clearBtn.className = 'clear-btn absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 text-xs';
-                    clearBtn.innerHTML = '×';
-                    clearBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        clearBox(index);
-                    });
-                    parent.appendChild(clearBtn);
+                    const btn = document.createElement('button');
+                    btn.className = 'clear-btn';
+                    btn.innerHTML = '×';
+                    btn.addEventListener('click', (e) => { e.stopPropagation(); clearBox(index); });
+                    parent.appendChild(btn);
                 }
             });
         }
 
-        // Update box styles
         function updateBoxStyles() {
-            document.querySelectorAll('.letter-box').forEach((box, index) => {
-                if (index === activeBox) {
-                    box.classList.add('active');
-                } else {
-                    box.classList.remove('active');
-                }
+            document.querySelectorAll('.letter-box').forEach((box, i) => {
+                box.classList.toggle('active', i === activeBox);
             });
         }
 
-        // Update keyboard visibility
         function updateKeyboard() {
             const keyboard = document.getElementById('keyboard');
-            const activePosition = document.getElementById('activePosition');
-            
+            const pos = document.getElementById('activePosition');
             if (activeBox !== null) {
                 keyboard.classList.remove('hidden');
-                activePosition.textContent = activeBox + 1;
+                pos.textContent = activeBox + 1;
             } else {
                 keyboard.classList.add('hidden');
             }
         }
 
-        // Update clear button visibility
         function updateClearButton() {
-            const clearBtn = document.getElementById('clearAll');
-            if (letterBoxes.some(box => box !== '')) {
-                clearBtn.classList.remove('hidden');
-            } else {
-                clearBtn.classList.add('hidden');
-            }
+            document.getElementById('clearAll').classList.toggle('hidden', !letterBoxes.some(b => b !== ''));
         }
 
-        // Add block
         function addBlock() {
             const input = document.getElementById('blockInput');
-            const blockText = input.value.trim().toLowerCase();
-
-            if (!blockText) return;
-
-            // allow duplicates by storing blocks as objects with unique ids
+            const text = input.value.trim().toLowerCase();
+            if (!text) return;
             const id = 'b' + (_blockIdCounter++).toString(36) + '-' + Date.now().toString(36);
-            requiredBlocks.push({ id, text: blockText });
+            requiredBlocks.push({ id, text });
             input.value = '';
             updateBlocksList();
             updateResults();
         }
 
-        // Remove block
         function removeBlock(id) {
             requiredBlocks = requiredBlocks.filter(b => b.id !== id);
             updateBlocksList();
             updateResults();
         }
 
-        // Update blocks list display
         function updateBlocksList() {
             const container = document.getElementById('blocksList');
             container.innerHTML = '';
-            
             requiredBlocks.forEach(block => {
                 const span = document.createElement('span');
                 span.className = 'px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm font-medium flex items-center gap-2 inline-flex';
-                span.innerHTML = `
-                    must contain: "${block.text}"
+                span.innerHTML = `must contain: "${block.text}"
                     <button class="hover:bg-indigo-200 rounded-full p-0.5" onclick="removeBlock('${block.id}')">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                    </button>
-                `;
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>`;
                 container.appendChild(span);
             });
         }
 
-        
-
-        // Event listeners
         document.getElementById('wordLength').addEventListener('change', (e) => {
             wordLength = parseInt(e.target.value);
             initializeBoxes();
             updateResults();
             updateClearButton();
         });
-
         document.getElementById('addBlock').addEventListener('click', addBlock);
-        document.getElementById('blockInput').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') addBlock();
-        });
-
+        document.getElementById('blockInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') addBlock(); });
         document.getElementById('clearAll').addEventListener('click', clearAllBoxes);
 
-        // Wire up local file input button (for static file usage)
-        const fileInputEl = document.getElementById('fileInput');
-        const loadFromFileBtn = document.getElementById('loadFromFile');
-        if (fileInputEl && loadFromFileBtn) {
-            loadFromFileBtn.addEventListener('click', () => {
-                const file = fileInputEl.files && fileInputEl.files[0];
-                if (!file) return alert('Please select a .txt file (wordlist.txt) first.');
-                handleLocalFile(file);
-            });
-            // Support immediate load on change as well
-            fileInputEl.addEventListener('change', (e) => {
-                const file = e.target.files && e.target.files[0];
-                if (file) {
-                    // keep user in control, don't auto-load if they prefer the button
-                }
-            });
-        }
-
-        // Keyboard typing and navigation support
         function moveActiveTo(index) {
-            if (index === null || index === undefined) {
-                activeBox = null;
-            } else {
-                if (index < 0) index = 0;
-                if (index >= letterBoxes.length) index = letterBoxes.length - 1;
-                activeBox = index;
-            }
-            updateBoxStyles();
-            updateKeyboard();
+            if (index == null) { activeBox = null; }
+            else { activeBox = Math.max(0, Math.min(letterBoxes.length - 1, index)); }
+            updateBoxStyles(); updateKeyboard();
         }
-
         function moveActive(delta) {
-            if (activeBox === null) {
-                // if none active, activate first or last depending on delta
-                moveActiveTo(delta > 0 ? 0 : letterBoxes.length - 1);
-                return;
-            }
-            const next = activeBox + delta;
-            if (next < 0 || next >= letterBoxes.length) {
-                // clamp and keep active
-                moveActiveTo(Math.max(0, Math.min(letterBoxes.length - 1, next)));
-            } else {
-                moveActiveTo(next);
-            }
+            if (activeBox === null) { moveActiveTo(delta > 0 ? 0 : letterBoxes.length - 1); return; }
+            moveActiveTo(activeBox + delta);
         }
 
         document.addEventListener('keydown', (e) => {
-            // Ignore when typing into form controls
             const ae = document.activeElement;
             if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
-
-            // Letter keys
             if (e.key && e.key.length === 1 && /^[a-zA-Z]$/.test(e.key)) {
                 e.preventDefault();
-                // If no active box, pick the first empty or 0
-                if (activeBox === null) {
-                    const nextEmpty = letterBoxes.findIndex(b => b === '');
-                    moveActiveTo(nextEmpty !== -1 ? nextEmpty : 0);
-                }
-                handleLetterInput(e.key.toUpperCase());
-                return;
+                if (activeBox === null) { const ne = letterBoxes.findIndex(b => b === ''); moveActiveTo(ne !== -1 ? ne : 0); }
+                handleLetterInput(e.key.toUpperCase()); return;
             }
-
-            // Navigation and edit keys
             if (e.key === 'Backspace') {
                 e.preventDefault();
-                if (activeBox !== null) {
-                    // clear current box
-                    clearBox(activeBox);
-                } else {
-                    // activate previous filled box if any
-                    const prev = (() => {
-                        for (let i = letterBoxes.length - 1; i >= 0; i--) {
-                            if (letterBoxes[i]) return i;
-                        }
-                        return null;
-                    })();
-                    if (prev !== null) moveActiveTo(prev);
-                }
+                if (activeBox !== null) { clearBox(activeBox); }
+                else { for (let i = letterBoxes.length - 1; i >= 0; i--) { if (letterBoxes[i]) { moveActiveTo(i); break; } } }
                 return;
             }
-
-            if (e.key === 'Delete') {
-                e.preventDefault();
-                if (activeBox !== null) clearBox(activeBox);
-                return;
-            }
-
-            if (e.key === 'ArrowRight' || e.key === 'Right') {
-                e.preventDefault();
-                moveActive(1);
-                return;
-            }
-            if (e.key === 'ArrowLeft' || e.key === 'Left') {
-                e.preventDefault();
-                moveActive(-1);
-                return;
-            }
-
+            if (e.key === 'Delete')     { e.preventDefault(); if (activeBox !== null) clearBox(activeBox); return; }
+            if (e.key === 'ArrowRight') { e.preventDefault(); moveActive(1);  return; }
+            if (e.key === 'ArrowLeft')  { e.preventDefault(); moveActive(-1); return; }
             if (e.key === 'Enter') {
                 e.preventDefault();
-                if (activeBox !== null) {
-                    // move to next empty or clear active
-                    const nextEmpty = letterBoxes.findIndex((box, i) => i > activeBox && box === '');
-                    moveActiveTo(nextEmpty !== -1 ? nextEmpty : null);
-                }
+                if (activeBox !== null) { const ne = letterBoxes.findIndex((b, i) => i > activeBox && b === ''); moveActiveTo(ne !== -1 ? ne : null); }
                 return;
             }
-
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                moveActiveTo(null);
-                return;
-            }
+            if (e.key === 'Escape') { e.preventDefault(); moveActiveTo(null); return; }
         });
 
-        // Initialize
         initializeBoxes();
         initializeKeyboard();
-        loadWordList();
+        initWordList();
     </script>
 </body>
 </html>
