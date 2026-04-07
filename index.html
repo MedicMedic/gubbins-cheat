@@ -4,13 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fill-in-the-Blanks Word Finder</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="wordlist.js"></script>
+    <script src="https://cdn.tailwindcss.com" defer></script>
+    <!-- Preconnect to font hosts to speed font loading -->
+    <link rel="preconnect" href="https://fonts.cdnfonts.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.cdnfonts.com/css/banana-grotesk" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Coming+Soon&display=swap" rel="stylesheet">
     <style>
-        /* Use Coming Soon for most UI text; exclude letter boxes and results. Set BG.jpg as background */
-        body { font-family: 'Coming Soon', cursive; background-image: url('BG.jpg') !important; background-size: cover !important; background-position: center !important; background-repeat: no-repeat !important; background-color: transparent !important; text-transform: uppercase !important; }
+        /* Use Coming Soon for most UI text; exclude letter boxes and results. Defer large background images for performance */
+        body { font-family: 'Coming Soon', cursive; background-color: transparent !important; text-transform: uppercase !important; }
         /* Letter boxes: fluid grid — all boxes in one row */
         #letterBoxes {
             display: grid;
@@ -133,7 +136,7 @@
 </head>
 <body class="bg-gradient-to-br from-blue-50 to-blue-100 min-h-screen p-3 sm:p-6">
     <div class="max-w-6xl mx-auto">
-        <div class="rounded-xl shadow-xl p-4 sm:p-8 inner-card" style="background-color: #eff0ea; background-image: url('InnerBG.jpg'); background-size: cover; background-position: center; background-repeat: no-repeat;">
+        <div class="rounded-xl shadow-xl p-4 sm:p-8 inner-card" style="background-color: #eff0ea;">
             <h1 class="text-2xl sm:text-4xl font-bold text-blue-700 mb-1">Gubbins Word Search Tool</h1>
             <p class="text-sm text-gray-600 mb-1">Click boxes to enter letters, or filter by required letter blocks</p>
             <p class="text-xs text-gray-500 mb-5">Dictionary: <span id="wordCount">Loading...</span> words</p>
@@ -207,6 +210,7 @@
 
     <script>
         let wordList = [];
+        const wordBuckets = Object.create(null); // length -> [words]
         let letterBoxes = [];
         let requiredBlocks = [];
         let filterByBlocks = false;
@@ -218,12 +222,42 @@
         function initWordList() {
             if (typeof WORD_LIST !== 'undefined') {
                 wordList = WORD_LIST;
+                // build length buckets and lowercase cache for faster filtering
+                for (const w of wordList) {
+                    const l = w.length;
+                    if (!wordBuckets[l]) wordBuckets[l] = [];
+                    wordBuckets[l].push(w.toLowerCase());
+                }
             } else {
                 console.error('wordlist.js not loaded — WORD_LIST is undefined');
             }
             document.getElementById('wordCount').textContent = wordList.length.toLocaleString();
+            // initial render should be immediate once word list available
             updateResults();
         }
+
+        // Fast pattern matcher without RegExp allocation
+        function matchesPattern(word, boxes) {
+            if (word.length !== boxes.length) return false;
+            for (let i = 0; i < boxes.length; i++) {
+                const b = boxes[i];
+                if (!b) continue;
+                if (word[i] !== b.toLowerCase()) return false;
+            }
+            return true;
+        }
+
+        // Debounce helper to avoid heavy recalculation on rapid input
+        function debounce(fn, wait) {
+            let t = null;
+            return function(...args) {
+                clearTimeout(t);
+                t = setTimeout(() => fn.apply(this, args), wait);
+            };
+        }
+
+        const scheduleUpdateResults = debounce(updateResults, 100);
+        function updateResultsImmediate() { updateResults(); }
 
         function setBoxGridColumns() {
             document.getElementById('letterBoxes').style.gridTemplateColumns = `repeat(${wordLength}, 1fr)`;
@@ -251,8 +285,7 @@
         }
 
         function updateResults() {
-            const pattern = letterBoxes.map(l => l === '' ? '.' : l.toLowerCase()).join('');
-            const patternRegex = new RegExp('^' + pattern + '$');
+            // We'll use the prebuilt buckets and a fast per-character check
 
             function matchBlocksForWord(word, blocks) {
                 if (!blocks || blocks.length === 0) return { placements: [], count: 0, totalLength: 0 };
@@ -305,16 +338,21 @@
                 return best;
             }
 
-            const resultsWithMeta = wordList.reduce((acc, word) => {
-                if (word.length !== wordLength) return acc;
-                if (!patternRegex.test(word)) return acc;
-                const lower = word.toLowerCase();
-                const blockTexts = requiredBlocks.map(b => b.text);
-                const match = matchBlocksForWord(lower, blockTexts);
-                if (filterByBlocks && match.count === 0) return acc;
-                acc.push({ word: lower, match });
-                return acc;
-            }, []);
+            const candidates = wordBuckets[wordLength] || [];
+            const blockTexts = requiredBlocks.map(b => b.text);
+            const resultsWithMeta = [];
+            for (let i = 0; i < candidates.length; i++) {
+                const w = candidates[i];
+                if (!matchesPattern(w, letterBoxes)) continue;
+                // If there are no required blocks, skip the expensive block-placement algorithm
+                if (requiredBlocks.length === 0) {
+                    resultsWithMeta.push({ word: w, match: { placements: [], count: 0, totalLength: 0 } });
+                    continue;
+                }
+                const match = matchBlocksForWord(w, blockTexts);
+                if (filterByBlocks && match.count === 0) continue;
+                resultsWithMeta.push({ word: w, match });
+            }
 
             resultsWithMeta.sort((a, b) => {
                 if (b.match.count !== a.match.count) return b.match.count - a.match.count;
@@ -386,7 +424,7 @@
                 activeBox = nextEmpty !== -1 ? nextEmpty : null;
                 updateBoxStyles();
                 updateKeyboard();
-                updateResults();
+                scheduleUpdateResults();
                 updateClearButton();
             }
         }
@@ -394,7 +432,7 @@
         function clearBox(index) {
             letterBoxes[index] = '';
             updateBoxDisplay();
-            updateResults();
+            scheduleUpdateResults();
             updateClearButton();
         }
 
@@ -404,7 +442,7 @@
             updateBoxDisplay();
             updateBoxStyles();
             updateKeyboard();
-            updateResults();
+            scheduleUpdateResults();
             updateClearButton();
         }
 
@@ -457,13 +495,13 @@
             requiredBlocks.push({ id, text, color });
             input.value = '';
             updateBlocksList();
-            updateResults();
+            scheduleUpdateResults();
         }
 
         function removeBlock(id) {
             requiredBlocks = requiredBlocks.filter(b => b.id !== id);
             updateBlocksList();
-            updateResults();
+            scheduleUpdateResults();
         }
 
         function updateBlocksList() {
@@ -490,14 +528,14 @@
         document.getElementById('wordLength').addEventListener('change', (e) => {
             wordLength = parseInt(e.target.value);
             initializeBoxes();
-            updateResults();
+            scheduleUpdateResults();
             updateClearButton();
         });
         document.getElementById('addBlock').addEventListener('click', addBlock);
         document.getElementById('blockInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') addBlock(); });
         document.getElementById('clearAll').addEventListener('click', clearAllBoxes);
-        document.getElementById('clearBlocksAll')?.addEventListener('click', () => { requiredBlocks = []; updateBlocksList(); updateResults(); });
-        document.getElementById('filterByBlocks')?.addEventListener('change', (e) => { filterByBlocks = !!e.target.checked; updateResults(); });
+        document.getElementById('clearBlocksAll')?.addEventListener('click', () => { requiredBlocks = []; updateBlocksList(); scheduleUpdateResults(); });
+        document.getElementById('filterByBlocks')?.addEventListener('change', (e) => { filterByBlocks = !!e.target.checked; scheduleUpdateResults(); });
 
         function moveActiveTo(index) {
             if (index == null) { activeBox = null; }
@@ -535,7 +573,40 @@
         });
 
         initializeBoxes();
-        initWordList();
+
+        // Load the (potentially large) word list asynchronously to avoid blocking initial render
+        (function loadWordlistAsync(){
+            const s = document.createElement('script');
+            s.src = 'wordlist.js';
+            s.defer = true;
+            s.onload = function(){
+                try { initWordList(); }
+                catch(e){ console.error('initWordList error:', e); }
+            };
+            s.onerror = function(){ console.error('Failed to load wordlist.js'); };
+            document.body.appendChild(s);
+        })();
+
+        // Lazy-load background images after idle or on load
+        (function lazyLoadBackgrounds(){
+            function applyImages(){
+                try {
+                    document.body.style.backgroundImage = "url('BG.jpg')";
+                    document.body.style.backgroundSize = 'cover';
+                    document.body.style.backgroundPosition = 'center';
+                    document.body.style.backgroundRepeat = 'no-repeat';
+                    const inner = document.querySelector('.inner-card');
+                    if (inner) {
+                        inner.style.backgroundImage = "url('InnerBG.jpg')";
+                        inner.style.backgroundSize = 'cover';
+                        inner.style.backgroundPosition = 'center';
+                        inner.style.backgroundRepeat = 'no-repeat';
+                    }
+                } catch(e){ /* ignore */ }
+            }
+            if ('requestIdleCallback' in window) requestIdleCallback(applyImages, {timeout:2000});
+            else window.addEventListener('load', applyImages);
+        })();
     </script>
 </body>
 </html>
