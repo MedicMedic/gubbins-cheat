@@ -6,84 +6,142 @@
     <title>Fill-in-the-Blanks Word Finder</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="wordlist.js"></script>
+    <link href="https://fonts.cdnfonts.com/css/banana-grotesk" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Coming+Soon&display=swap" rel="stylesheet">
     <style>
+        /* Use Coming Soon for most UI text; exclude letter boxes and results. Set BG.jpg as background */
+        body { font-family: 'Coming Soon', cursive; background-image: url('BG.jpg') !important; background-size: cover !important; background-position: center !important; background-repeat: no-repeat !important; background-color: transparent !important; text-transform: uppercase !important; }
         /* Letter boxes: fluid grid — all boxes in one row */
         #letterBoxes {
             display: grid;
-            gap: 4px;
+            gap: 0;
             width: 100%;
+            max-width: 560px;
+            margin: 0 auto;
         }
         .letter-box {
             width: 100%;
             aspect-ratio: 1;
-            font-weight: bold;
-            border: 2px solid #d1d5db;
-            border-radius: 0.4rem;
-            background-color: #f9fafb;
+            font-family: 'Banana Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+            border: 2px solid #000000;
+            border-radius: 0;
+            background-color: #e6e2d6;
             cursor: pointer;
-            transition: all 0.2s;
-            font-size: clamp(0.65rem, 4vw, 1.4rem);
+            transition: all 0.12s;
+            font-size: clamp(0.45rem, 2.2vw, 2rem);
             display: flex;
             align-items: center;
             justify-content: center;
             line-height: 1;
         }
-        .letter-box:hover  { border-color: #818cf8; }
-        .letter-box.active { border-color: #4f46e5; background-color: #eef2ff; }
-        .letter-box.filled { border-color: #9ca3af; background-color: white; }
+        .letter-box:hover  { border-color: #000000; transform: scale(1.01); }
+        .letter-box.active { outline: 2px solid rgba(0,0,0,0.08); }
+        .letter-box.filled { color: #000000; }
+
+        /* Filled color cycle (in order, then loop) */
+        .fill-color-0 { background-color: #e9bba4; }
+        .fill-color-1 { background-color: #e7b465; }
+        .fill-color-2 { background-color: #f6e29b; }
+        .fill-color-3 { background-color: #e4db4e; }
+        .fill-color-4 { background-color: #b3be9e; }
+        .fill-color-5 { background-color: #bec4dc; }
+        .fill-color-6 { background-color: #ceb7cb; }
 
         .clear-btn {
             position: absolute;
             top: -6px; right: -6px;
             width: 16px; height: 16px;
-            background: #ef4444;
-            color: white;
+            background: #eabb9f;
+            color: #000;
             border-radius: 50%;
             display: flex; align-items: center; justify-content: center;
             font-size: 10px;
             cursor: pointer;
-            border: none;
+            border: 2px solid #000;
             line-height: 1;
         }
-        .clear-btn:hover { background: #dc2626; }
+        .clear-btn:hover { background: #d79a86; }
 
         .keyboard-btn {
             border: 2px solid #d1d5db;
             border-radius: 0.4rem;
-            background-color: white;
+            background-color: #eff0ea;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s;
-            padding: 0;
+            padding: 0.5rem 0;
             aspect-ratio: 1;
             width: 100%;
-            font-size: clamp(0.6rem, 3vw, 1rem);
+            font-size: clamp(0.85rem, 2.6vw, 1.15rem);
         }
-        .keyboard-btn:hover { border-color: #4f46e5; background-color: #eef2ff; }
+        .keyboard-btn:hover { border-color: #4f46e5; background-color: #e6e9df; }
+
+        /* Larger form controls */
+        #blockInput, #wordLength {
+            font-size: 1.05rem;
+            padding: 0.75rem 0.9rem;
+            background-color: #eff0ea;
+        }
+        /* Add-block button: plus sign with angular corners, #189973 background and black border */
+        #addBlock {
+            background-color: #189973;
+            border: 2px solid #000;
+            border-radius: 0;
+            color: #ffffff;
+            width: 42px;
+            height: 42px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: background 120ms ease, transform 120ms ease;
+            padding: 0;
+        }
+        #addBlock:hover { background-color: #147a60; transform: translateY(-1px); }
+
+        /* Results pane background */
+        #resultsContainer { background-color: #eff0ea; }
 
         .block-color-0 { background-color: #fde68a; }
         .block-color-1 { background-color: #bbf7d0; }
         .block-color-2 { background-color: #bfdbfe; }
         .block-color-3 { background-color: #fbcfe8; }
-        .block-color-4 { background-color: #c7d2fe; }
         .block-color-5 { background-color: #fecaca; }
         .block-color-6 { background-color: #fef3c7; }
         .block-color-7 { background-color: #d1fae5; }
         .block-color-8 { background-color: #e9d5ff; }
         .block-span { padding: 0 0.2rem; border-radius: 0.3rem; display: inline-block; }
+        .required-block { border: 2px solid #000; border-radius: 0; color: #000; padding: 0.55rem 0.55rem; font-size: 2rem; display: inline-flex; align-items: center; gap: 0.5rem; text-transform: uppercase; letter-spacing: 0.12em; font-family: 'Banana Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
+
+        .clear-blocks-btn { background: #e6bda1; border: 2px solid #000; color: #000; display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0.25rem; width: 42px; overflow: hidden; white-space: nowrap; cursor: pointer; transition: width 180ms ease, background 120ms; font-size: 1.25rem; }
+            .clear-blocks-btn { background: #e6bda1; border: 2px solid #000; color: #000; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.15rem 0.25rem; width: 42px; overflow: hidden; white-space: nowrap; cursor: pointer; transition: width 180ms ease, background 120ms, justify-content 120ms ease, padding-left 120ms ease; font-size: 1.25rem; }
+            .clear-blocks-btn .label { display: none; margin-left: 6px; }
+            .clear-blocks-btn:hover { width: 110px; justify-content: flex-start; padding-left: 8px; }
+            .clear-blocks-btn:hover .label { display: inline-block; }
+
+        /* Results should use Banana Grotesk */
+        #resultsContainer, #resultsContainer * { font-family: 'Banana Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
+        .result-tile { text-transform: uppercase; letter-spacing: 0.18em; font-family: 'Banana Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; color: #000; }
+        /* Make UI angular and add black borders */
+        .rounded-xl, .rounded-lg, .rounded, .rounded-md, .rounded-full { border-radius: 0 !important; }
+        .inner-card { border: 2px solid #000 !important; }
+        #resultsContainer, .result-tile, .required-block, .block-span, input, select, button, .keyboard-btn, .clear-blocks-btn { border: 2px solid #000 !important; border-radius: 0 !important; }
+        /* keep the small clear X circular */
+        .clear-btn { border-radius: 50% !important; }
     </style>
 </head>
-<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-3 sm:p-6">
+<body class="bg-gradient-to-br from-blue-50 to-blue-100 min-h-screen p-3 sm:p-6">
     <div class="max-w-6xl mx-auto">
-        <div class="bg-white rounded-xl shadow-xl p-4 sm:p-8">
-            <h1 class="text-2xl sm:text-4xl font-bold text-indigo-700 mb-1">Fill-in-the-Blanks Search</h1>
+        <div class="rounded-xl shadow-xl p-4 sm:p-8 inner-card" style="background-color: #eff0ea; background-image: url('InnerBG.jpg'); background-size: cover; background-position: center; background-repeat: no-repeat;">
+            <h1 class="text-2xl sm:text-4xl font-bold text-blue-700 mb-1">Gubbins Word Search Tool</h1>
             <p class="text-sm text-gray-600 mb-1">Click boxes to enter letters, or filter by required letter blocks</p>
             <p class="text-xs text-gray-500 mb-5">Dictionary: <span id="wordCount">Loading...</span> words</p>
 
             <!-- Word Length Selector -->
             <div class="mb-5">
                 <label class="block text-sm font-semibold text-gray-700 mb-2">Number of Letters</label>
-                <select id="wordLength" class="w-full sm:w-auto px-3 py-2 text-base border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none bg-white">
+                <select id="wordLength" class="w-full sm:w-auto px-3 py-2 text-base border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none" style="background-color: #eff0ea;">
                     <option value="2">2 Letters</option>
                     <option value="3">3 Letters</option>
                     <option value="4">4 Letters</option>
@@ -105,24 +163,23 @@
             <div class="mb-6">
                 <div class="flex items-center justify-between mb-2">
                     <label class="block text-sm font-semibold text-gray-700">Fill in the blanks</label>
-                    <button id="clearAll" class="text-sm text-red-600 hover:text-red-700 font-medium hidden">Clear All</button>
+                    <button id="clearAll" class="clear-blocks-btn" title="Clear all letters" style="display: none;"><span class="icon">×</span><span class="label">Clear All</span></button>
                 </div>
                 <div id="letterBoxes" class="mb-3"></div>
 
-                <!-- On-screen keyboard -->
-                <div id="keyboard" class="p-3 bg-indigo-50 rounded-lg border-2 border-indigo-200 hidden">
-                    <p class="text-xs font-medium text-gray-700 mb-2">Enter letter for position <span id="activePosition"></span>:</p>
-                    <div id="keyboardButtons" style="display:grid; grid-template-columns: repeat(9,1fr); gap:4px;"></div>
-                </div>
+                <!-- on-screen keyboard removed; typing via physical keyboard is enabled -->
             </div>
 
             <!-- Required Letter Blocks -->
-            <div class="mb-5 p-3 bg-gray-50 rounded-lg">
-                <label class="block text-sm font-semibold text-gray-700 mb-2">Required Letter Blocks <span class="font-normal text-gray-400">(optional)</span></label>
+            <div class="mb-5 p-3" style="background-color: #eff0ea;">
+                <div class="flex items-center justify-between mb-2">
+                    <label class="block text-sm font-semibold text-gray-700">Required Letter Blocks <span class="font-normal text-gray-400">(optional)</span></label>
+                    <button id="clearBlocksAll" class="clear-blocks-btn" title="Clear all blocks"><span class="icon">×</span><span class="label">Clear All</span></button>
+                </div>
                 <div class="flex gap-2 mb-3 w-full">
                     <input type="text" id="blockInput" placeholder='e.g. ail, v, able'
                            class="flex-1 min-w-0 px-3 py-2 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none text-sm">
-                    <button id="addBlock" class="shrink-0 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium">Add</button>
+                    <button id="addBlock" class="shrink-0" aria-label="Add block">+</button>
                 </div>
                 <div id="blocksList" class="flex flex-wrap gap-2"></div>
             </div>
@@ -134,6 +191,12 @@
                         Results
                         <span class="text-base font-normal text-gray-500 ml-1">(<span id="resultCount">0</span> <span id="resultWord">words</span>)</span>
                     </h2>
+                    <div class="flex items-center gap-3">
+                        <label class="text-sm text-gray-600 flex items-center gap-2">
+                            <input type="checkbox" id="filterByBlocks" />
+                            <span class="text-sm">Only show words with required blocks</span>
+                        </label>
+                    </div>
                 </div>
                 <div id="resultsContainer" class="text-center py-10 bg-gray-50 rounded-lg border-2 border-gray-200">
                     <p class="text-gray-400 text-sm">Click boxes above to start searching</p>
@@ -146,6 +209,8 @@
         let wordList = [];
         let letterBoxes = [];
         let requiredBlocks = [];
+        let filterByBlocks = false;
+        const BLOCK_PALETTE = ['#e9bba4','#e7b465','#f6e29b','#e4db4e','#b3be9e','#bec4dc','#ceb7cb'];
         let _blockIdCounter = 0;
         let activeBox = null;
         let wordLength = 9;
@@ -246,6 +311,7 @@
                 const lower = word.toLowerCase();
                 const blockTexts = requiredBlocks.map(b => b.text);
                 const match = matchBlocksForWord(lower, blockTexts);
+                if (filterByBlocks && match.count === 0) return acc;
                 acc.push({ word: lower, match });
                 return acc;
             }, []);
@@ -261,22 +327,28 @@
             document.getElementById('resultWord').textContent = resultsWithMeta.length === 1 ? 'word' : 'words';
 
             if (resultsWithMeta.length > 0) {
-                container.className = 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 max-h-96 overflow-y-auto p-3 bg-gray-50 rounded-lg border-2 border-gray-200';
+                container.className = 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-96 overflow-y-auto p-3 bg-gray-50 rounded-lg border-2 border-gray-200';
+                const palette = ['#e9bba4','#e7b465','#f6e29b','#e4db4e','#b3be9e','#bec4dc','#ceb7cb'];
                 container.innerHTML = resultsWithMeta.map(item => {
                     const w = item.word;
-                    const colorMap = Array(w.length).fill(null);
-                    for (const p of item.match.placements) {
-                        const ci = p.blockIndex % 9;
-                        for (let i = p.start; i < p.start + p.length; i++) colorMap[i] = ci;
-                    }
+                        const colorMap = Array(w.length).fill(null);
+                        for (const p of item.match.placements) {
+                            const bi = p.blockIndex;
+                            const col = (requiredBlocks[bi] && requiredBlocks[bi].color) || BLOCK_PALETTE[bi % BLOCK_PALETTE.length];
+                            for (let i = p.start; i < p.start + p.length; i++) colorMap[i] = col;
+                        }
                     let html = '';
-                    for (let i = 0; i < w.length; i++) {
-                        const ci = colorMap[i];
-                        html += ci === null
-                            ? `<span>${w[i]}</span>`
-                            : `<span class="block-span block-color-${ci}">${w[i]}</span>`;
-                    }
-                    return `<div class="px-2 py-2 bg-white border-2 border-gray-200 rounded-lg text-center font-medium text-gray-700 hover:border-indigo-400 hover:shadow-md transition text-sm sm:text-base">${html}</div>`;
+                        for (let i = 0; i < w.length; i++) {
+                            const col = colorMap[i];
+                            if (col === null) {
+                                html += `<span>${w[i]}</span>`;
+                            } else {
+                                const dark = darkenHex(col, 16);
+                                html += `<span class="block-span" style="background-color: ${dark};">${w[i]}</span>`;
+                            }
+                        }
+                        const color = palette[Math.floor(Math.random() * palette.length)];
+                        return `<div class="px-2 py-2 border-2 border-gray-200 rounded-lg text-center font-medium hover:border-indigo-400 hover:shadow-md transition text-sm sm:text-base result-tile" style="background-color: ${color};">${html}</div>`;
                 }).join('');
             } else {
                 container.className = 'text-center py-10 bg-gray-50 rounded-lg border-2 border-gray-200';
@@ -285,15 +357,19 @@
             }
         }
 
-        function initializeKeyboard() {
-            const container = document.getElementById('keyboardButtons');
-            for (const letter of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
-                const btn = document.createElement('button');
-                btn.className = 'keyboard-btn';
-                btn.textContent = letter;
-                btn.addEventListener('click', () => handleLetterInput(letter));
-                container.appendChild(btn);
-            }
+        // on-screen keyboard removed; physical keyboard typing is supported
+
+        function darkenHex(hex, percent) {
+            hex = (hex || '').replace('#','');
+            if (hex.length !== 6) return hex;
+            const num = parseInt(hex,16);
+            let r = (num >> 16) & 0xff;
+            let g = (num >> 8) & 0xff;
+            let b = num & 0xff;
+            r = Math.max(0, Math.min(255, Math.round(r * (100 - percent) / 100)));
+            g = Math.max(0, Math.min(255, Math.round(g * (100 - percent) / 100)));
+            b = Math.max(0, Math.min(255, Math.round(b * (100 - percent) / 100)));
+            return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
         }
 
         function handleBoxClick(index) {
@@ -336,8 +412,13 @@
             document.querySelectorAll('.letter-box').forEach((box, index) => {
                 const parent = box.parentElement;
                 const letter = letterBoxes[index];
-                box.textContent = letter;
-                box.className = `letter-box${letter ? ' filled' : ''}`;
+                    box.textContent = letter;
+                    if (letter) {
+                        const colorIndex = index % 7;
+                        box.className = `letter-box filled fill-color-${colorIndex}`;
+                    } else {
+                        box.className = 'letter-box';
+                    }
                 const existing = parent.querySelector('.clear-btn');
                 if (existing) existing.remove();
                 if (letter) {
@@ -357,18 +438,14 @@
         }
 
         function updateKeyboard() {
-            const keyboard = document.getElementById('keyboard');
+            // no visual on-screen keyboard; keep active position text updated if present
             const pos = document.getElementById('activePosition');
-            if (activeBox !== null) {
-                keyboard.classList.remove('hidden');
-                pos.textContent = activeBox + 1;
-            } else {
-                keyboard.classList.add('hidden');
-            }
+            if (pos) pos.textContent = activeBox !== null ? (activeBox + 1) : '';
         }
 
         function updateClearButton() {
-            document.getElementById('clearAll').classList.toggle('hidden', !letterBoxes.some(b => b !== ''));
+            const btn = document.getElementById('clearAll');
+            if (btn) btn.style.display = letterBoxes.some(b => b !== '') ? 'inline-flex' : 'none';
         }
 
         function addBlock() {
@@ -376,7 +453,8 @@
             const text = input.value.trim().toLowerCase();
             if (!text) return;
             const id = 'b' + (_blockIdCounter++).toString(36) + '-' + Date.now().toString(36);
-            requiredBlocks.push({ id, text });
+            const color = BLOCK_PALETTE[Math.floor(Math.random() * BLOCK_PALETTE.length)];
+            requiredBlocks.push({ id, text, color });
             input.value = '';
             updateBlocksList();
             updateResults();
@@ -393,15 +471,20 @@
             container.innerHTML = '';
             requiredBlocks.forEach(block => {
                 const span = document.createElement('span');
-                span.className = 'px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm font-medium flex items-center gap-2 inline-flex';
-                span.innerHTML = `must contain: "${block.text}"
-                    <button class="hover:bg-indigo-200 rounded-full p-0.5" onclick="removeBlock('${block.id}')">
+                span.className = 'required-block';
+                const color = block.color || BLOCK_PALETTE[Math.floor(Math.random() * BLOCK_PALETTE.length)];
+                span.style.backgroundColor = color;
+                span.innerHTML = `${block.text.toUpperCase()}
+                    <button class="hover:bg-indigo-200 rounded p-0.5" onclick="removeBlock('${block.id}')" aria-label="remove block">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                         </svg>
                     </button>`;
                 container.appendChild(span);
             });
+            // toggle clear button visibility
+            const clearBtn = document.getElementById('clearBlocksAll');
+            if (clearBtn) clearBtn.style.display = requiredBlocks.length ? 'inline-flex' : 'none';
         }
 
         document.getElementById('wordLength').addEventListener('change', (e) => {
@@ -413,6 +496,8 @@
         document.getElementById('addBlock').addEventListener('click', addBlock);
         document.getElementById('blockInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') addBlock(); });
         document.getElementById('clearAll').addEventListener('click', clearAllBoxes);
+        document.getElementById('clearBlocksAll')?.addEventListener('click', () => { requiredBlocks = []; updateBlocksList(); updateResults(); });
+        document.getElementById('filterByBlocks')?.addEventListener('change', (e) => { filterByBlocks = !!e.target.checked; updateResults(); });
 
         function moveActiveTo(index) {
             if (index == null) { activeBox = null; }
@@ -450,7 +535,6 @@
         });
 
         initializeBoxes();
-        initializeKeyboard();
         initWordList();
     </script>
 </body>
