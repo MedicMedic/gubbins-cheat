@@ -247,6 +247,58 @@
             return true;
         }
 
+        // Block-placement matcher (moved out so it can be reused or run in a worker)
+        function matchBlocksForWord(word, blocks, letterBoxesLocal) {
+            if (!blocks || blocks.length === 0) return { placements: [], count: 0, totalLength: 0 };
+            const positions = blocks.map(block => {
+                const starts = [];
+                const bl = block.length;
+                for (let i = 0; i <= word.length - bl; i++) {
+                    if (word.substr(i, bl) !== block) continue;
+                    let hit = false;
+                    for (let k = i; k < i + bl; k++) {
+                        if (letterBoxesLocal[k] && letterBoxesLocal[k] !== '') { hit = true; break; }
+                    }
+                    if (!hit) starts.push(i);
+                }
+                return starts;
+            });
+            if (positions.every(p => p.length === 0)) return { placements: [], count: 0, totalLength: 0 };
+            const n = blocks.length;
+            const order = Array.from({ length: n }, (_, i) => i)
+                .sort((a, b) => {
+                    const la = blocks[a].length, lb = blocks[b].length;
+                    if (lb !== la) return lb - la;
+                    return positions[a].length - positions[b].length;
+                });
+            let best = { placements: [], count: 0, totalLength: 0 };
+            const used = [];
+            function overlapsRange(s, e) {
+                for (const u of used) { if (!(e < u.start || s > u.end)) return true; }
+                return false;
+            }
+            function backtrack(idx, cur, curLen) {
+                if (idx === order.length) {
+                    if (cur.length > best.count || (cur.length === best.count && curLen > best.totalLength))
+                        best = { placements: cur.slice(), count: cur.length, totalLength: curLen };
+                    return;
+                }
+                const bi = order[idx];
+                const bl = blocks[bi].length;
+                for (const s of positions[bi]) {
+                    const e = s + bl - 1;
+                    if (overlapsRange(s, e)) continue;
+                    used.push({ start: s, end: e });
+                    cur.push({ blockIndex: bi, start: s, length: bl });
+                    backtrack(idx + 1, cur, curLen + bl);
+                    cur.pop(); used.pop();
+                }
+                backtrack(idx + 1, cur, curLen);
+            }
+            backtrack(0, [], 0);
+            return best;
+        }
+
         // Debounce helper to avoid heavy recalculation on rapid input
         function debounce(fn, wait) {
             let t = null;
@@ -259,101 +311,41 @@
         const scheduleUpdateResults = debounce(updateResults, 100);
         function updateResultsImmediate() { updateResults(); }
 
-        function setBoxGridColumns() {
-            document.getElementById('letterBoxes').style.gridTemplateColumns = `repeat(${wordLength}, 1fr)`;
-        }
-
-        function initializeBoxes() {
-            const container = document.getElementById('letterBoxes');
-            container.innerHTML = '';
-            letterBoxes = Array(wordLength).fill('');
-            setBoxGridColumns();
-            for (let i = 0; i < wordLength; i++) {
-                const wrap = document.createElement('div');
-                wrap.className = 'relative';
-                wrap.style.minWidth = '0';
-                wrap.innerHTML = `<button class="letter-box" data-index="${i}"></button>`;
-                container.appendChild(wrap);
-            }
-            document.querySelectorAll('.letter-box').forEach((box, i) => {
-                box.addEventListener('click', () => handleBoxClick(i));
-            });
-            activeBox = null;
-            updateBoxDisplay();
-            updateBoxStyles();
-            updateKeyboard();
-        }
-
-        function updateResults() {
-            // We'll use the prebuilt buckets and a fast per-character check
-
-            function matchBlocksForWord(word, blocks) {
-                if (!blocks || blocks.length === 0) return { placements: [], count: 0, totalLength: 0 };
-                const positions = blocks.map(block => {
-                    const starts = [];
-                    const bl = block.length;
-                    for (let i = 0; i <= word.length - bl; i++) {
-                        if (word.substr(i, bl) !== block) continue;
-                        let hit = false;
-                        for (let k = i; k < i + bl; k++) {
-                            if (letterBoxes[k] && letterBoxes[k] !== '') { hit = true; break; }
-                        }
-                        if (!hit) starts.push(i);
-                    }
-                    return starts;
-                });
-                if (positions.every(p => p.length === 0)) return { placements: [], count: 0, totalLength: 0 };
-                const n = blocks.length;
-                const order = Array.from({ length: n }, (_, i) => i)
-                    .sort((a, b) => {
-                        const la = blocks[a].length, lb = blocks[b].length;
-                        if (lb !== la) return lb - la;
-                        return positions[a].length - positions[b].length;
-                    });
-                let best = { placements: [], count: 0, totalLength: 0 };
-                const used = [];
-                function overlapsRange(s, e) {
-                    for (const u of used) { if (!(e < u.start || s > u.end)) return true; }
-                    return false;
-                }
-                function backtrack(idx, cur, curLen) {
-                    if (idx === order.length) {
-                        if (cur.length > best.count || (cur.length === best.count && curLen > best.totalLength))
-                            best = { placements: cur.slice(), count: cur.length, totalLength: curLen };
+        // Web Worker for block-placement matching (if available)
+        let blockWorker = null;
+        let latestJobId = 0;
+        if (window.Worker) {
+            try {
+                blockWorker = new Worker('blockWorker.js');
+                // accumulate partial results per job so the UI can update progressively
+                const workerResultsAccum = Object.create(null);
+                blockWorker.onmessage = function(e) {
+                    const { jobId, partial, results, done } = e.data;
+                    if (jobId !== latestJobId) return; // stale
+                    if (partial && partial.length) {
+                        if (!workerResultsAccum[jobId]) workerResultsAccum[jobId] = [];
+                        workerResultsAccum[jobId].push(...partial);
+                        renderResultsFromMeta(workerResultsAccum[jobId]);
+                        if (done) delete workerResultsAccum[jobId];
                         return;
                     }
-                    const bi = order[idx];
-                    const bl = blocks[bi].length;
-                    for (const s of positions[bi]) {
-                        const e = s + bl - 1;
-                        if (overlapsRange(s, e)) continue;
-                        used.push({ start: s, end: e });
-                        cur.push({ blockIndex: bi, start: s, length: bl });
-                        backtrack(idx + 1, cur, curLen + bl);
-                        cur.pop(); used.pop();
+                    if (partial && partial.length === 0 && done) {
+                        // nothing found
+                        renderResultsFromMeta([]);
+                        return;
                     }
-                    backtrack(idx + 1, cur, curLen);
-                }
-                backtrack(0, [], 0);
-                return best;
+                    if (results) {
+                        renderResultsFromMeta(results);
+                    }
+                };
+            } catch (err) {
+                blockWorker = null;
+                console.warn('Worker creation failed, falling back to main-thread matching', err);
             }
+        }
 
-            const candidates = wordBuckets[wordLength] || [];
-            const blockTexts = requiredBlocks.map(b => b.text);
-            const resultsWithMeta = [];
-            for (let i = 0; i < candidates.length; i++) {
-                const w = candidates[i];
-                if (!matchesPattern(w, letterBoxes)) continue;
-                // If there are no required blocks, skip the expensive block-placement algorithm
-                if (requiredBlocks.length === 0) {
-                    resultsWithMeta.push({ word: w, match: { placements: [], count: 0, totalLength: 0 } });
-                    continue;
-                }
-                const match = matchBlocksForWord(w, blockTexts);
-                if (filterByBlocks && match.count === 0) continue;
-                resultsWithMeta.push({ word: w, match });
-            }
-
+        // Render helper reused by both sync and worker paths
+        function renderResultsFromMeta(resultsWithMeta) {
             resultsWithMeta.sort((a, b) => {
                 if (b.match.count !== a.match.count) return b.match.count - a.match.count;
                 if (b.match.totalLength !== a.match.totalLength) return b.match.totalLength - a.match.totalLength;
@@ -395,6 +387,86 @@
             }
         }
 
+        function setBoxGridColumns() {
+            document.getElementById('letterBoxes').style.gridTemplateColumns = `repeat(${wordLength}, 1fr)`;
+        }
+
+        function initializeBoxes() {
+            const container = document.getElementById('letterBoxes');
+            container.innerHTML = '';
+            letterBoxes = Array(wordLength).fill('');
+            setBoxGridColumns();
+            for (let i = 0; i < wordLength; i++) {
+                const wrap = document.createElement('div');
+                wrap.className = 'relative';
+                wrap.style.minWidth = '0';
+                wrap.innerHTML = `<button class="letter-box" data-index="${i}"></button>`;
+                container.appendChild(wrap);
+            }
+            document.querySelectorAll('.letter-box').forEach((box, i) => {
+                box.addEventListener('click', () => handleBoxClick(i));
+            });
+            activeBox = null;
+            updateBoxDisplay();
+            updateBoxStyles();
+            updateKeyboard();
+        }
+
+        function updateResults() {
+            // We'll use the prebuilt buckets and a fast per-character check
+            const candidates = wordBuckets[wordLength] || [];
+            const blockTexts = requiredBlocks.map(b => b.text);
+            const filtered = [];
+            for (let i = 0; i < candidates.length; i++) {
+                const w = candidates[i];
+                if (matchesPattern(w, letterBoxes)) filtered.push(w);
+            }
+
+            if (filtered.length === 0) {
+                renderResultsFromMeta([]);
+                return;
+            }
+
+            // If there are no required blocks, short-circuit and render quickly
+            if (requiredBlocks.length === 0) {
+                const resultsWithMeta = filtered.map(w => ({ word: w, match: { placements: [], count: 0, totalLength: 0 } }));
+                renderResultsFromMeta(resultsWithMeta);
+                return;
+            }
+
+            // Use worker if available to run block-placement matching off the UI thread
+            if (blockWorker) {
+                latestJobId += 1;
+                const jobId = latestJobId;
+                // If user requested only words that contain required blocks, prefilter by simple substring check to dramatically reduce work
+                let toSend = filtered;
+                if (filterByBlocks && blockTexts.length) {
+                    const pre = [];
+                    for (let i = 0; i < filtered.length; i++) {
+                        const w = filtered[i];
+                        let ok = true;
+                        for (let j = 0; j < blockTexts.length; j++) { if (w.indexOf(blockTexts[j]) === -1) { ok = false; break; } }
+                        if (ok) pre.push(w);
+                    }
+                    toSend = pre;
+                    if (toSend.length === 0) { renderResultsFromMeta([]); return; }
+                }
+                // send only necessary data
+                blockWorker.postMessage({ jobId, candidates: toSend, letterBoxes: letterBoxes.slice(), blocks: blockTexts, filterByBlocks: !!filterByBlocks });
+                return; // results will be rendered when worker posts back
+            }
+
+            // Fallback: synchronous matching on main thread
+            const resultsWithMeta = [];
+            for (let i = 0; i < filtered.length; i++) {
+                const w = filtered[i];
+                const match = matchBlocksForWord(w, blockTexts, letterBoxes);
+                if (filterByBlocks && match.count === 0) continue;
+                resultsWithMeta.push({ word: w, match });
+            }
+            renderResultsFromMeta(resultsWithMeta);
+        }
+
         // on-screen keyboard removed; physical keyboard typing is supported
 
         function darkenHex(hex, percent) {
@@ -414,6 +486,9 @@
             activeBox = activeBox === index ? null : index;
             updateBoxStyles();
             updateKeyboard();
+            // Focus the hidden input so mobile devices open the soft keyboard
+            const hid = document.getElementById('hiddenInput');
+            if (hid) hid.focus({ preventScroll: true });
         }
 
         function handleLetterInput(letter) {
@@ -573,6 +648,58 @@
         });
 
         initializeBoxes();
+
+        // Create a small hidden input that receives focus on mobile to open the soft keyboard
+        function createHiddenInput() {
+            if (document.getElementById('hiddenInput')) return;
+            const inp = document.createElement('input');
+            inp.id = 'hiddenInput';
+            inp.type = 'text';
+            inp.autocorrect = 'off';
+            inp.autocomplete = 'off';
+            inp.autocapitalize = 'characters';
+            inp.spellcheck = false;
+            inp.inputMode = 'text';
+            // place it on-screen but invisible so mobile keyboards will open
+            inp.style.position = 'fixed';
+            inp.style.left = '8px';
+            inp.style.bottom = '8px';
+            inp.style.width = '40px';
+            inp.style.height = '36px';
+            inp.style.opacity = '0';
+            inp.style.zIndex = '9999';
+            inp.style.background = 'transparent';
+            inp.style.border = 'none';
+            document.body.appendChild(inp);
+
+            // When user types on mobile, the input event fires with the typed characters
+            inp.addEventListener('input', (e) => {
+                const v = e.target.value || '';
+                if (!v) return;
+                // insert all characters (handle multi-letter paste), keep only last char as typed
+                for (let i = 0; i < v.length; i++) {
+                    const ch = v[i];
+                    if (/^[a-zA-Z]$/.test(ch)) handleLetterInput(ch.toUpperCase());
+                }
+                e.target.value = '';
+            });
+
+            // Handle navigation and deletion keys while the hidden input has focus
+            inp.addEventListener('keydown', (e) => {
+                if (e.key === 'Backspace') {
+                    e.preventDefault();
+                    if (activeBox !== null) { clearBox(activeBox); }
+                    else { for (let i = letterBoxes.length - 1; i >= 0; i--) { if (letterBoxes[i]) { moveActiveTo(i); break; } } }
+                    return;
+                }
+                if (e.key === 'Delete') { e.preventDefault(); if (activeBox !== null) clearBox(activeBox); return; }
+                if (e.key === 'ArrowRight') { e.preventDefault(); moveActive(1); return; }
+                if (e.key === 'ArrowLeft') { e.preventDefault(); moveActive(-1); return; }
+                if (e.key === 'Enter') { e.preventDefault(); if (activeBox !== null) { const ne = letterBoxes.findIndex((b, i) => i > activeBox && b === ''); moveActiveTo(ne !== -1 ? ne : null); } return; }
+                if (e.key === 'Escape') { e.preventDefault(); moveActiveTo(null); return; }
+            });
+        }
+        createHiddenInput();
 
         // Load the (potentially large) word list asynchronously to avoid blocking initial render
         (function loadWordlistAsync(){
