@@ -55,19 +55,12 @@ function matchBlocksForWord(word, blocks, letterBoxesLocal) {
 self.onmessage = function(e) {
     const { jobId, candidates, letterBoxes, blocks, filterByBlocks } = e.data;
     const results = [];
-    const chunkSize = 500; // tuneable
     for (let i = 0; i < candidates.length; i++) {
         const w = candidates[i];
         // we assume candidates were already filtered by simple pattern match
         const match = matchBlocksForWord(w, blocks, letterBoxes);
         if (filterByBlocks && match.count === 0) continue;
         results.push({ word: w, match });
-        // Post partial results periodically so UI can update progressively
-        if (results.length >= chunkSize) {
-            self.postMessage({ jobId, partial: results.splice(0, results.length), done: false });
-        }
     }
-    // send any remaining partials and final message
-    if (results.length) self.postMessage({ jobId, partial: results.splice(0, results.length), done: true });
-    else self.postMessage({ jobId, partial: [], done: true });
+    self.postMessage({ jobId, results });
 };

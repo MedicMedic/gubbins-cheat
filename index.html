@@ -317,21 +317,19 @@
         if (window.Worker) {
             try {
                 blockWorker = new Worker('blockWorker.js');
-                // accumulate partial results per job so the UI can update progressively
+                // accumulate worker chunks and render once when the job is complete
                 const workerResultsAccum = Object.create(null);
                 blockWorker.onmessage = function(e) {
                     const { jobId, partial, results, done } = e.data;
                     if (jobId !== latestJobId) return; // stale
-                    if (partial && partial.length) {
+                    if (partial) {
                         if (!workerResultsAccum[jobId]) workerResultsAccum[jobId] = [];
-                        workerResultsAccum[jobId].push(...partial);
-                        renderResultsFromMeta(workerResultsAccum[jobId]);
-                        if (done) delete workerResultsAccum[jobId];
-                        return;
-                    }
-                    if (partial && partial.length === 0 && done) {
-                        // nothing found
-                        renderResultsFromMeta([]);
+                        if (partial.length) workerResultsAccum[jobId].push(...partial);
+                        if (done) {
+                            const finalResults = workerResultsAccum[jobId] || [];
+                            delete workerResultsAccum[jobId];
+                            renderResultsFromMeta(finalResults);
+                        }
                         return;
                     }
                     if (results) {
