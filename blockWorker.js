@@ -1,18 +1,36 @@
 // Worker: receives { jobId, candidates, letterBoxes, blocks, filterByBlocks }
 // and returns { jobId, results: [{word, match}] }
 
-function matchBlocksForWord(word, blocks, letterBoxesLocal) {
+function matchesPattern(word, boxes) {
+    if (word.length !== boxes.length) return false;
+    for (let i = 0; i < boxes.length; i++) {
+        const b = boxes[i];
+        if (!b) continue;
+        if (word[i] !== b.toLowerCase()) return false;
+    }
+    return true;
+}
+
+function buildFilledPrefix(letterBoxesLocal) {
+    const prefix = new Array(letterBoxesLocal.length + 1).fill(0);
+    for (let i = 0; i < letterBoxesLocal.length; i++) {
+        prefix[i + 1] = prefix[i] + (letterBoxesLocal[i] && letterBoxesLocal[i] !== '' ? 1 : 0);
+    }
+    return prefix;
+}
+
+function hasFilledInRange(prefix, start, length) {
+    return (prefix[start + length] - prefix[start]) > 0;
+}
+
+function matchBlocksForWord(word, blocks, filledPrefix) {
     if (!blocks || blocks.length === 0) return { placements: [], count: 0, totalLength: 0 };
     const positions = blocks.map(block => {
         const starts = [];
         const bl = block.length;
         for (let i = 0; i <= word.length - bl; i++) {
-            if (word.substr(i, bl) !== block) continue;
-            let hit = false;
-            for (let k = i; k < i + bl; k++) {
-                if (letterBoxesLocal[k] && letterBoxesLocal[k] !== '') { hit = true; break; }
-            }
-            if (!hit) starts.push(i);
+            if (!word.startsWith(block, i)) continue;
+            if (!hasFilledInRange(filledPrefix, i, bl)) starts.push(i);
         }
         return starts;
     });
@@ -54,11 +72,19 @@ function matchBlocksForWord(word, blocks, letterBoxesLocal) {
 
 self.onmessage = function(e) {
     const { jobId, candidates, letterBoxes, blocks, filterByBlocks } = e.data;
+    const filledPrefix = buildFilledPrefix(letterBoxes);
     const results = [];
     for (let i = 0; i < candidates.length; i++) {
         const w = candidates[i];
-        // we assume candidates were already filtered by simple pattern match
-        const match = matchBlocksForWord(w, blocks, letterBoxes);
+        if (!matchesPattern(w, letterBoxes)) continue;
+        // Fast gate: skip expensive placement search when no block appears at all.
+        let maybeHasBlock = false;
+        for (let j = 0; j < blocks.length; j++) {
+            if (w.indexOf(blocks[j]) !== -1) { maybeHasBlock = true; break; }
+        }
+        const match = maybeHasBlock
+            ? matchBlocksForWord(w, blocks, filledPrefix)
+            : { placements: [], count: 0, totalLength: 0 };
         if (filterByBlocks && match.count === 0) continue;
         results.push({ word: w, match });
     }

@@ -218,22 +218,159 @@
         let _blockIdCounter = 0;
         let activeBox = null;
         let wordLength = 9;
+        const WORD_CACHE_VERSION = 1;
+        const WORD_CACHE_DB = 'gubbins-word-cache';
+        const WORD_CACHE_STORE = 'kv';
+        const WORD_CACHE_KEY = 'word-buckets-v1';
+        const MAX_VISIBLE_RESULTS = 300;
+        let wordlistScriptPromise = null;
 
-        function initWordList() {
-            if (typeof WORD_LIST !== 'undefined') {
-                wordList = WORD_LIST;
-                // build length buckets and lowercase cache for faster filtering
-                for (const w of wordList) {
-                    const l = w.length;
-                    if (!wordBuckets[l]) wordBuckets[l] = [];
-                    wordBuckets[l].push(w.toLowerCase());
-                }
-            } else {
-                console.error('wordlist.js not loaded — WORD_LIST is undefined');
+        function clearBuckets() {
+            for (const k in wordBuckets) delete wordBuckets[k];
+        }
+
+        function buildBucketsFromWords(words) {
+            const buckets = Object.create(null);
+            for (let i = 0; i < words.length; i++) {
+                const w = words[i].toLowerCase();
+                const l = w.length;
+                if (!buckets[l]) buckets[l] = [];
+                buckets[l].push(w);
             }
-            document.getElementById('wordCount').textContent = wordList.length.toLocaleString();
-            // initial render should be immediate once word list available
+            return buckets;
+        }
+
+        function computeWordListSignature(words) {
+            const list = words || [];
+            let hash = 2166136261 >>> 0;
+            const step = Math.max(1, Math.floor(list.length / 2048));
+            for (let i = 0; i < list.length; i += step) {
+                const w = (list[i] || '').toLowerCase();
+                hash ^= w.length;
+                hash = Math.imul(hash, 16777619) >>> 0;
+                const maxChars = Math.min(6, w.length);
+                for (let c = 0; c < maxChars; c++) {
+                    hash ^= w.charCodeAt(c);
+                    hash = Math.imul(hash, 16777619) >>> 0;
+                }
+            }
+            hash ^= list.length;
+            hash = Math.imul(hash, 16777619) >>> 0;
+            return hash.toString(16).padStart(8, '0');
+        }
+
+        function applyBuckets(buckets, totalWords) {
+            clearBuckets();
+            for (const k in buckets) wordBuckets[k] = buckets[k];
+            wordList = [];
+            wordList.length = totalWords || 0;
+            document.getElementById('wordCount').textContent = (totalWords || 0).toLocaleString();
             updateResults();
+        }
+
+        function openWordCacheDb() {
+            return new Promise((resolve, reject) => {
+                if (!window.indexedDB) { resolve(null); return; }
+                const req = indexedDB.open(WORD_CACHE_DB, 1);
+                req.onupgradeneeded = function() {
+                    const db = req.result;
+                    if (!db.objectStoreNames.contains(WORD_CACHE_STORE)) db.createObjectStore(WORD_CACHE_STORE);
+                };
+                req.onsuccess = function() { resolve(req.result); };
+                req.onerror = function() { reject(req.error); };
+            });
+        }
+
+        async function getCachedWordData() {
+            try {
+                const db = await openWordCacheDb();
+                if (!db) return null;
+                const rec = await new Promise((resolve, reject) => {
+                    const tx = db.transaction(WORD_CACHE_STORE, 'readonly');
+                    const store = tx.objectStore(WORD_CACHE_STORE);
+                    const req = store.get(WORD_CACHE_KEY);
+                    req.onsuccess = function() { resolve(req.result || null); };
+                    req.onerror = function() { reject(req.error); };
+                });
+                db.close();
+                if (!rec) return null;
+                if (rec.version !== WORD_CACHE_VERSION) return null;
+                if (!rec.buckets || typeof rec.totalWords !== 'number') return null;
+                return rec;
+            } catch (_) {
+                return null;
+            }
+        }
+
+        async function setCachedWordData(buckets, totalWords, signature) {
+            try {
+                const db = await openWordCacheDb();
+                if (!db) return;
+                await new Promise((resolve, reject) => {
+                    const tx = db.transaction(WORD_CACHE_STORE, 'readwrite');
+                    const store = tx.objectStore(WORD_CACHE_STORE);
+                    store.put({ version: WORD_CACHE_VERSION, totalWords, buckets, signature: signature || null }, WORD_CACHE_KEY);
+                    tx.oncomplete = function() { resolve(); };
+                    tx.onerror = function() { reject(tx.error); };
+                });
+                db.close();
+            } catch (_) {
+                // ignore cache write errors (quota/private mode/etc)
+            }
+        }
+
+        function loadWordlistScript() {
+            if (typeof WORD_LIST !== 'undefined') return Promise.resolve();
+            if (wordlistScriptPromise) return wordlistScriptPromise;
+            wordlistScriptPromise = new Promise((resolve, reject) => {
+                const existing = document.querySelector('script[src="wordlist.js"]');
+                if (existing) {
+                    existing.addEventListener('load', () => resolve(), { once: true });
+                    existing.addEventListener('error', (e) => reject(e), { once: true });
+                    return;
+                }
+                const s = document.createElement('script');
+                s.src = 'wordlist.js';
+                s.defer = true;
+                s.onload = resolve;
+                s.onerror = reject;
+                document.body.appendChild(s);
+            });
+            return wordlistScriptPromise;
+        }
+
+        async function refreshWordDataInBackground(cachedSignature) {
+            try {
+                await loadWordlistScript();
+                if (typeof WORD_LIST === 'undefined') return;
+                const nextSignature = computeWordListSignature(WORD_LIST);
+                if (cachedSignature && nextSignature === cachedSignature) return;
+                const nextBuckets = buildBucketsFromWords(WORD_LIST);
+                applyBuckets(nextBuckets, WORD_LIST.length);
+                setCachedWordData(nextBuckets, WORD_LIST.length, nextSignature);
+            } catch (e) {
+                console.warn('Background wordlist refresh failed:', e);
+            }
+        }
+
+        async function initWordData() {
+            const cached = await getCachedWordData();
+            if (cached) {
+                applyBuckets(cached.buckets, cached.totalWords);
+                refreshWordDataInBackground(cached.signature || null);
+                return;
+            }
+
+            try {
+                await loadWordlistScript();
+                if (typeof WORD_LIST === 'undefined') throw new Error('WORD_LIST is undefined');
+                const buckets = buildBucketsFromWords(WORD_LIST);
+                const signature = computeWordListSignature(WORD_LIST);
+                applyBuckets(buckets, WORD_LIST.length);
+                setCachedWordData(buckets, WORD_LIST.length, signature);
+            } catch (e) {
+                console.error('Failed to initialize word data:', e);
+            }
         }
 
         // Fast pattern matcher without RegExp allocation
@@ -247,19 +384,27 @@
             return true;
         }
 
+        function buildFilledPrefix(letterBoxesLocal) {
+            const prefix = new Array(letterBoxesLocal.length + 1).fill(0);
+            for (let i = 0; i < letterBoxesLocal.length; i++) {
+                prefix[i + 1] = prefix[i] + (letterBoxesLocal[i] && letterBoxesLocal[i] !== '' ? 1 : 0);
+            }
+            return prefix;
+        }
+
+        function hasFilledInRange(prefix, start, length) {
+            return (prefix[start + length] - prefix[start]) > 0;
+        }
+
         // Block-placement matcher (moved out so it can be reused or run in a worker)
-        function matchBlocksForWord(word, blocks, letterBoxesLocal) {
+        function matchBlocksForWord(word, blocks, filledPrefix) {
             if (!blocks || blocks.length === 0) return { placements: [], count: 0, totalLength: 0 };
             const positions = blocks.map(block => {
                 const starts = [];
                 const bl = block.length;
                 for (let i = 0; i <= word.length - bl; i++) {
-                    if (word.substr(i, bl) !== block) continue;
-                    let hit = false;
-                    for (let k = i; k < i + bl; k++) {
-                        if (letterBoxesLocal[k] && letterBoxesLocal[k] !== '') { hit = true; break; }
-                    }
-                    if (!hit) starts.push(i);
+                    if (!word.startsWith(block, i)) continue;
+                    if (!hasFilledInRange(filledPrefix, i, bl)) starts.push(i);
                 }
                 return starts;
             });
@@ -308,7 +453,7 @@
             };
         }
 
-        const scheduleUpdateResults = debounce(updateResults, 100);
+        const scheduleUpdateResults = debounce(updateResults, 40);
         function updateResultsImmediate() { updateResults(); }
 
         // Web Worker for block-placement matching (if available)
@@ -343,21 +488,26 @@
         }
 
         // Render helper reused by both sync and worker paths
-        function renderResultsFromMeta(resultsWithMeta) {
-            resultsWithMeta.sort((a, b) => {
-                if (b.match.count !== a.match.count) return b.match.count - a.match.count;
-                if (b.match.totalLength !== a.match.totalLength) return b.match.totalLength - a.match.totalLength;
-                return a.word.localeCompare(b.word);
-            });
+        function renderResultsFromMeta(resultsWithMeta, options = {}) {
+            if (!options.skipSort) {
+                resultsWithMeta.sort((a, b) => {
+                    if (b.match.count !== a.match.count) return b.match.count - a.match.count;
+                    if (b.match.totalLength !== a.match.totalLength) return b.match.totalLength - a.match.totalLength;
+                    return a.word.localeCompare(b.word);
+                });
+            }
 
             const container = document.getElementById('resultsContainer');
-            document.getElementById('resultCount').textContent = resultsWithMeta.length;
-            document.getElementById('resultWord').textContent = resultsWithMeta.length === 1 ? 'word' : 'words';
+            const totalResults = resultsWithMeta.length;
+            document.getElementById('resultCount').textContent = totalResults;
+            document.getElementById('resultWord').textContent = totalResults === 1 ? 'word' : 'words';
 
-            if (resultsWithMeta.length > 0) {
+            if (totalResults > 0) {
+                const visibleResults = resultsWithMeta.slice(0, MAX_VISIBLE_RESULTS);
+                const truncated = totalResults > MAX_VISIBLE_RESULTS;
                 container.className = 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-96 overflow-y-auto p-3 bg-gray-50 rounded-lg border-2 border-gray-200';
                 const palette = ['#e9bba4','#e7b465','#f6e29b','#e4db4e','#b3be9e','#bec4dc','#ceb7cb'];
-                container.innerHTML = resultsWithMeta.map(item => {
+                let gridHtml = visibleResults.map(item => {
                     const w = item.word;
                         const colorMap = Array(w.length).fill(null);
                         for (const p of item.match.placements) {
@@ -378,6 +528,10 @@
                         const color = palette[Math.floor(Math.random() * palette.length)];
                         return `<div class="px-2 py-2 border-2 border-gray-200 rounded-lg text-center font-medium hover:border-indigo-400 hover:shadow-md transition text-sm sm:text-base result-tile" style="background-color: ${color};">${html}</div>`;
                 }).join('');
+                if (truncated) {
+                    gridHtml += `<div class="col-span-2 sm:col-span-3 lg:col-span-4 text-xs text-gray-500 text-center py-1">Showing first ${MAX_VISIBLE_RESULTS.toLocaleString()} of ${totalResults.toLocaleString()} matches</div>`;
+                }
+                container.innerHTML = gridHtml;
             } else {
                 container.className = 'text-center py-10 bg-gray-50 rounded-lg border-2 border-gray-200';
                 const hasInput = letterBoxes.some(b => b !== '') || requiredBlocks.length > 0;
@@ -411,58 +565,45 @@
         }
 
         function updateResults() {
-            // We'll use the prebuilt buckets and a fast per-character check
             const candidates = wordBuckets[wordLength] || [];
             const blockTexts = requiredBlocks.map(b => b.text);
-            const filtered = [];
-            for (let i = 0; i < candidates.length; i++) {
-                const w = candidates[i];
-                if (matchesPattern(w, letterBoxes)) filtered.push(w);
-            }
+            const filledPrefix = buildFilledPrefix(letterBoxes);
 
-            if (filtered.length === 0) {
+            if (candidates.length === 0) {
                 renderResultsFromMeta([]);
                 return;
             }
 
-            // If there are no required blocks, short-circuit and render quickly
-            if (requiredBlocks.length === 0) {
-                const resultsWithMeta = filtered.map(w => ({ word: w, match: { placements: [], count: 0, totalLength: 0 } }));
-                renderResultsFromMeta(resultsWithMeta);
-                return;
-            }
-
-            // Use worker if available to run block-placement matching off the UI thread
+            // Use worker when available so typing stays responsive.
             if (blockWorker) {
                 latestJobId += 1;
                 const jobId = latestJobId;
-                // If user requested only words that contain required blocks, prefilter by simple substring check to dramatically reduce work
-                let toSend = filtered;
-                if (filterByBlocks && blockTexts.length) {
-                    const pre = [];
-                    for (let i = 0; i < filtered.length; i++) {
-                        const w = filtered[i];
-                        let ok = true;
-                        for (let j = 0; j < blockTexts.length; j++) { if (w.indexOf(blockTexts[j]) === -1) { ok = false; break; } }
-                        if (ok) pre.push(w);
-                    }
-                    toSend = pre;
-                    if (toSend.length === 0) { renderResultsFromMeta([]); return; }
-                }
-                // send only necessary data
-                blockWorker.postMessage({ jobId, candidates: toSend, letterBoxes: letterBoxes.slice(), blocks: blockTexts, filterByBlocks: !!filterByBlocks });
+                blockWorker.postMessage({
+                    jobId,
+                    candidates,
+                    letterBoxes: letterBoxes.slice(),
+                    blocks: blockTexts,
+                    filterByBlocks: !!filterByBlocks
+                });
                 return; // results will be rendered when worker posts back
             }
 
             // Fallback: synchronous matching on main thread
             const resultsWithMeta = [];
-            for (let i = 0; i < filtered.length; i++) {
-                const w = filtered[i];
-                const match = matchBlocksForWord(w, blockTexts, letterBoxes);
+            for (let i = 0; i < candidates.length; i++) {
+                const w = candidates[i];
+                if (!matchesPattern(w, letterBoxes)) continue;
+                let maybeHasBlock = false;
+                for (let j = 0; j < blockTexts.length; j++) {
+                    if (w.indexOf(blockTexts[j]) !== -1) { maybeHasBlock = true; break; }
+                }
+                const match = maybeHasBlock
+                    ? matchBlocksForWord(w, blockTexts, filledPrefix)
+                    : { placements: [], count: 0, totalLength: 0 };
                 if (filterByBlocks && match.count === 0) continue;
                 resultsWithMeta.push({ word: w, match });
             }
-            renderResultsFromMeta(resultsWithMeta);
+            renderResultsFromMeta(resultsWithMeta, { skipSort: requiredBlocks.length === 0 });
         }
 
         // on-screen keyboard removed; physical keyboard typing is supported
@@ -699,18 +840,8 @@
         }
         createHiddenInput();
 
-        // Load the (potentially large) word list asynchronously to avoid blocking initial render
-        (function loadWordlistAsync(){
-            const s = document.createElement('script');
-            s.src = 'wordlist.js';
-            s.defer = true;
-            s.onload = function(){
-                try { initWordList(); }
-                catch(e){ console.error('initWordList error:', e); }
-            };
-            s.onerror = function(){ console.error('Failed to load wordlist.js'); };
-            document.body.appendChild(s);
-        })();
+        // Load from IndexedDB cache first; fall back to wordlist.js on cache miss.
+        initWordData();
 
         // Lazy-load background images after idle or on load
         (function lazyLoadBackgrounds(){
