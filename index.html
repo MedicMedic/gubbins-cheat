@@ -132,6 +132,85 @@
         #resultsContainer, .result-tile, .required-block, .block-span, input, select, button, .keyboard-btn, .clear-blocks-btn { border: 2px solid #000 !important; border-radius: 0 !important; }
         /* keep the small clear X circular */
         .clear-btn { border-radius: 50% !important; }
+
+        /* Save button on result tiles */
+        .save-word-btn {
+            position: absolute;
+            top: 3px; right: 4px;
+            background: none;
+            border: none !important;
+            color: rgba(0,0,0,0.18);
+            font-size: 0.78rem;
+            cursor: pointer;
+            line-height: 1;
+            padding: 2px 3px;
+            transition: color 100ms;
+        }
+        .save-word-btn:hover, .save-word-btn.saved { color: #c49a22; }
+
+        /* Saved words panel */
+        .saved-word-item {
+            display: flex;
+            align-items: stretch;
+            border: 2px solid #000;
+            background: #eff0ea;
+        }
+        .restore-saved-btn {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            padding: 0.35rem 0.6rem;
+            background: none;
+            border: none !important;
+            border-right: 2px solid #000 !important;
+            cursor: pointer;
+            text-align: left;
+            font-family: 'Banana Grotesk', system-ui, sans-serif;
+            transition: background 100ms;
+        }
+        .restore-saved-btn:hover { background: #e9bba4; }
+        .saved-word-text {
+            font-size: 0.95rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+        }
+        .saved-word-meta {
+            font-size: 0.62rem;
+            color: #555;
+            letter-spacing: 0.05em;
+            margin-top: 2px;
+            font-family: 'Banana Grotesk', system-ui, sans-serif;
+        }
+        .remove-saved-btn {
+            width: 34px;
+            flex-shrink: 0;
+            background: none;
+            border: none !important;
+            cursor: pointer;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 100ms;
+            color: #000;
+        }
+        .remove-saved-btn:hover { background: #e6bda1; }
+
+        /* Remove word button on result tiles */
+        .remove-word-btn {
+            position: absolute;
+            top: 3px; left: 4px;
+            background: none;
+            border: none !important;
+            color: rgba(0,0,0,0.18);
+            font-size: 0.75rem;
+            cursor: pointer;
+            line-height: 1;
+            padding: 2px 3px;
+            transition: color 100ms;
+        }
+        .remove-word-btn:hover { color: #c0392b; }
     </style>
 </head>
 <body class="bg-gradient-to-br from-blue-50 to-blue-100 min-h-screen p-3 sm:p-6">
@@ -187,6 +266,24 @@
                 <div id="blocksList" class="flex flex-wrap gap-2"></div>
             </div>
 
+            <!-- Position Analysis (auto-shown when blocks are set) -->
+            <div id="posAnalysisSection" class="mb-5 p-3" style="display: none; background-color: #eff0ea;">
+                <div class="flex items-center justify-between mb-2">
+                    <label class="block text-sm font-semibold text-gray-700">Position Analysis</label>
+                    <button id="posAnalysisToggle" type="button" onclick="togglePositionAnalysis()" title="Collapse" style="background:none;border:2px solid #000!important;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1rem;font-weight:700;line-height:1;padding:0;font-family:'Banana Grotesk',sans-serif;">−</button>
+                </div>
+                <div id="posAnalysisResults"></div>
+            </div>
+
+            <!-- Saved Words Panel -->
+            <div id="savedWordsSection" class="mb-5" style="display: none;">
+                <div class="flex items-center justify-between mb-2">
+                    <label class="block text-sm font-semibold text-gray-700">Saved Words <span id="savedWordsBadge" class="text-gray-400 font-normal text-xs"></span></label>
+                    <button id="clearSavedAll" class="clear-blocks-btn" title="Clear all saved words"><span class="icon">×</span><span class="label">Clear All</span></button>
+                </div>
+                <div id="savedWordsList" class="grid grid-cols-1 sm:grid-cols-2 gap-1"></div>
+            </div>
+
             <!-- Results -->
             <div class="mt-6">
                 <div class="flex items-center justify-between mb-3">
@@ -194,7 +291,11 @@
                         Results
                         <span class="text-base font-normal text-gray-500 ml-1">(<span id="resultCount">0</span> <span id="resultWord">words</span>)</span>
                     </h2>
-                    <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <span id="hiddenWordsNotice" style="display:none; font-family:'Banana Grotesk',sans-serif; font-size:0.75rem; color:#888;">
+                            <span id="hiddenWordsCount">0</span> hidden &middot;
+                            <button type="button" onclick="restoreAllRemovedWords()" style="background:none;border:none!important;color:#189973;cursor:pointer;font-size:0.75rem;padding:0;font-family:'Banana Grotesk',sans-serif;text-decoration:underline;">restore all</button>
+                        </span>
                         <label class="text-sm text-gray-600 flex items-center gap-2">
                             <input type="checkbox" id="filterByBlocks" />
                             <span class="text-sm">Only show words with required blocks</span>
@@ -224,6 +325,10 @@
         const WORD_CACHE_KEY = 'word-buckets-v1';
         const MAX_VISIBLE_RESULTS = 300;
         let wordlistScriptPromise = null;
+        let savedWords = [];
+        const SAVED_WORDS_KEY = 'gubbins-saved-words';
+        let removedWords = new Set();
+        const REMOVED_WORDS_KEY = 'gubbins-removed-words';
 
         function clearBuckets() {
             for (const k in wordBuckets) delete wordBuckets[k];
@@ -266,6 +371,7 @@
             wordList.length = totalWords || 0;
             document.getElementById('wordCount').textContent = (totalWords || 0).toLocaleString();
             updateResults();
+            schedulePositionAnalysis();
         }
 
         function openWordCacheDb() {
@@ -345,6 +451,8 @@
                 if (typeof WORD_LIST === 'undefined') return;
                 const nextSignature = computeWordListSignature(WORD_LIST);
                 if (cachedSignature && nextSignature === cachedSignature) return;
+                // Wordlist changed — clear any word removals so nothing is lost
+                if (removedWords.size > 0) { removedWords = new Set(); persistRemovedWords(); updateHiddenWordsNotice(); }
                 const nextBuckets = buildBucketsFromWords(WORD_LIST);
                 applyBuckets(nextBuckets, WORD_LIST.length);
                 setCachedWordData(nextBuckets, WORD_LIST.length, nextSignature);
@@ -526,7 +634,8 @@
                             }
                         }
                         const color = palette[Math.floor(Math.random() * palette.length)];
-                        return `<div class="px-2 py-2 border-2 border-gray-200 rounded-lg text-center font-medium hover:border-indigo-400 hover:shadow-md transition text-sm sm:text-base result-tile" style="background-color: ${color};">${html}</div>`;
+                        const alreadySaved = savedWords.some(s => s.word === w);
+                        return `<div class="px-2 py-2 border-2 border-gray-200 rounded-lg text-center font-medium hover:border-indigo-400 hover:shadow-md transition text-sm sm:text-base result-tile" style="background-color: ${color}; position: relative;"><button type="button" class="remove-word-btn" onclick="removeWordFromCache('${w}')" title="Remove this word">×</button><button type="button" class="save-word-btn${alreadySaved ? ' saved' : ''}" data-word="${w}" onclick="saveCurrentWord('${w}')" title="Save this word">★</button>${html}</div>`;
                 }).join('');
                 if (truncated) {
                     gridHtml += `<div class="col-span-2 sm:col-span-3 lg:col-span-4 text-xs text-gray-500 text-center py-1">Showing first ${MAX_VISIBLE_RESULTS.toLocaleString()} of ${totalResults.toLocaleString()} matches</div>`;
@@ -537,6 +646,7 @@
                 const hasInput = letterBoxes.some(b => b !== '') || requiredBlocks.length > 0;
                 container.innerHTML = `<p class="text-gray-400 text-sm">${hasInput ? 'No words found matching your pattern' : 'Click boxes above to start searching'}</p>`;
             }
+            updateHiddenWordsNotice();
         }
 
         function setBoxGridColumns() {
@@ -565,7 +675,8 @@
         }
 
         function updateResults() {
-            const candidates = wordBuckets[wordLength] || [];
+            const raw = wordBuckets[wordLength] || [];
+            const candidates = removedWords.size > 0 ? raw.filter(w => !removedWords.has(w)) : raw;
             const blockTexts = requiredBlocks.map(b => b.text);
             const filledPrefix = buildFilledPrefix(letterBoxes);
 
@@ -640,6 +751,7 @@
                 updateKeyboard();
                 scheduleUpdateResults();
                 updateClearButton();
+                schedulePositionAnalysis();
             }
         }
 
@@ -648,6 +760,7 @@
             updateBoxDisplay();
             scheduleUpdateResults();
             updateClearButton();
+            schedulePositionAnalysis();
         }
 
         function clearAllBoxes() {
@@ -658,6 +771,7 @@
             updateKeyboard();
             scheduleUpdateResults();
             updateClearButton();
+            schedulePositionAnalysis();
         }
 
         function updateBoxDisplay() {
@@ -710,12 +824,14 @@
             input.value = '';
             updateBlocksList();
             scheduleUpdateResults();
+            schedulePositionAnalysis();
         }
 
         function removeBlock(id) {
             requiredBlocks = requiredBlocks.filter(b => b.id !== id);
             updateBlocksList();
             scheduleUpdateResults();
+            schedulePositionAnalysis();
         }
 
         function updateBlocksList() {
@@ -739,17 +855,341 @@
             if (clearBtn) clearBtn.style.display = requiredBlocks.length ? 'inline-flex' : 'none';
         }
 
+        function loadRemovedWords() {
+            try {
+                const raw = localStorage.getItem(REMOVED_WORDS_KEY);
+                if (raw) removedWords = new Set(JSON.parse(raw));
+            } catch (_) { removedWords = new Set(); }
+        }
+
+        function persistRemovedWords() {
+            try { localStorage.setItem(REMOVED_WORDS_KEY, JSON.stringify([...removedWords])); } catch (_) {}
+        }
+
+        function updateHiddenWordsNotice() {
+            const notice = document.getElementById('hiddenWordsNotice');
+            const countEl = document.getElementById('hiddenWordsCount');
+            if (!notice) return;
+            if (removedWords.size > 0) {
+                if (countEl) countEl.textContent = removedWords.size;
+                notice.style.display = '';
+            } else {
+                notice.style.display = 'none';
+            }
+        }
+
+        function removeWordFromCache(word) {
+            removedWords.add(word);
+            persistRemovedWords();
+            // Remove tile(s) from DOM immediately for instant feedback
+            document.querySelectorAll('.result-tile').forEach(tile => {
+                if (tile.querySelector(`.save-word-btn[data-word="${word}"]`)) tile.remove();
+            });
+            const countEl = document.getElementById('resultCount');
+            if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
+            updateHiddenWordsNotice();
+        }
+
+        function restoreAllRemovedWords() {
+            removedWords = new Set();
+            persistRemovedWords();
+            updateHiddenWordsNotice();
+            scheduleUpdateResults();
+        }
+
+        function loadSavedWords() {
+            try {
+                const raw = localStorage.getItem(SAVED_WORDS_KEY);
+                if (raw) savedWords = JSON.parse(raw);
+            } catch (_) { savedWords = []; }
+            updateSavedWordsPanel();
+        }
+
+        function persistSavedWords() {
+            try { localStorage.setItem(SAVED_WORDS_KEY, JSON.stringify(savedWords)); } catch (_) {}
+        }
+
+        function saveCurrentWord(word) {
+            const alreadyExists = savedWords.some(s =>
+                s.word === word &&
+                s.wordLength === wordLength &&
+                JSON.stringify(s.letterBoxes) === JSON.stringify(letterBoxes) &&
+                JSON.stringify(s.blocks.map(b => b.text)) === JSON.stringify(requiredBlocks.map(b => b.text))
+            );
+            if (alreadyExists) return;
+            const id = 'sw' + Date.now().toString(36);
+            const blockTexts = requiredBlocks.map(b => b.text);
+            const filledPrefix = buildFilledPrefix(letterBoxes);
+            const match = matchBlocksForWord(word, blockTexts, filledPrefix);
+            savedWords.unshift({ id, word, wordLength, letterBoxes: letterBoxes.slice(), blocks: requiredBlocks.map(b => ({...b})), placements: match.placements });
+            persistSavedWords();
+            updateSavedWordsPanel();
+            document.querySelectorAll(`.save-word-btn[data-word="${word}"]`).forEach(btn => btn.classList.add('saved'));
+        }
+
+        function removeSavedWord(id) {
+            savedWords = savedWords.filter(s => s.id !== id);
+            persistSavedWords();
+            updateSavedWordsPanel();
+            scheduleUpdateResults();
+        }
+
+        function restoreSavedWord(id) {
+            const saved = savedWords.find(s => s.id === id);
+            if (!saved) return;
+            wordLength = saved.wordLength;
+            document.getElementById('wordLength').value = wordLength;
+            initializeBoxes();
+            letterBoxes = saved.letterBoxes.slice();
+            for (const p of (saved.placements || [])) {
+                for (let i = p.start; i < p.start + p.length; i++) {
+                    letterBoxes[i] = saved.word[i].toUpperCase();
+                }
+            }
+            updateBoxDisplay();
+            updateClearButton();
+            requiredBlocks = saved.blocks.map(b => ({...b}));
+            updateBlocksList();
+            scheduleUpdateResults();
+            schedulePositionAnalysis();
+        }
+
+        function renderSavedWordHtml(word, placements, blocks) {
+            const colorMap = Array(word.length).fill(null);
+            for (const p of (placements || [])) {
+                const block = blocks[p.blockIndex];
+                if (block) {
+                    for (let i = p.start; i < p.start + p.length; i++) colorMap[i] = block.color;
+                }
+            }
+            let html = '';
+            for (let i = 0; i < word.length; i++) {
+                const col = colorMap[i];
+                html += col
+                    ? `<span style="background-color:${darkenHex(col, 16)};padding:0 1px;">${word[i].toUpperCase()}</span>`
+                    : `<span>${word[i].toUpperCase()}</span>`;
+            }
+            return html;
+        }
+
+        function updateSavedWordsPanel() {
+            const section = document.getElementById('savedWordsSection');
+            const badge = document.getElementById('savedWordsBadge');
+            const list = document.getElementById('savedWordsList');
+            if (!section) return;
+            if (badge) badge.textContent = savedWords.length ? `(${savedWords.length})` : '';
+            if (savedWords.length === 0) { section.style.display = 'none'; return; }
+            section.style.display = '';
+            list.innerHTML = savedWords.map(saved => {
+                const patternPreview = saved.letterBoxes.map(l => l || '·').join('');
+                const wordHtml = renderSavedWordHtml(saved.word, saved.placements, saved.blocks);
+                return `<div class="saved-word-item">
+                    <button type="button" class="restore-saved-btn" onclick="restoreSavedWord('${saved.id}')">
+                        <span class="saved-word-text">${wordHtml}</span>
+                        <span class="saved-word-meta">${patternPreview}</span>
+                    </button>
+                    <button type="button" class="remove-saved-btn" onclick="removeSavedWord('${saved.id}')" title="Remove">×</button>
+                </div>`;
+            }).join('');
+        }
+
+        // Count words in candidates that have blockText starting at each position,
+        // requiring all otherBlockTexts to appear somewhere in the word too.
+        // Positions overlapping filled letter boxes are left at 0 (marked taken).
+        function analyzeBlockPositionsFiltered(blockText, otherBlockTexts, candidates, filledPrefix) {
+            const bl = blockText.length;
+            if (bl === 0 || bl > wordLength) return [];
+            const numPositions = wordLength - bl + 1;
+            const counts = new Array(numPositions).fill(0);
+            for (const word of candidates) {
+                if (otherBlockTexts.some(t => !word.includes(t))) continue;
+                for (let i = 0; i < numPositions; i++) {
+                    if (hasFilledInRange(filledPrefix, i, bl)) continue; // position taken by a letter box
+                    if (word.startsWith(blockText, i)) counts[i]++;
+                }
+            }
+            return counts;
+        }
+
+        function getSubsets(arr, size) {
+            if (size > arr.length) return [];
+            if (size === arr.length) return [arr.slice()];
+            if (size === 1) return arr.map(x => [x]);
+            const result = [];
+            for (let i = 0; i <= arr.length - size; i++) {
+                for (const rest of getSubsets(arr.slice(i + 1), size - 1)) result.push([arr[i], ...rest]);
+            }
+            return result;
+        }
+
+        // Find top non-overlapping position combos for ALL blocks in the given array.
+        // Each result: { positions (1-indexed), count, blocks }
+        function computeJointPlacementsN(blocks, candidates, filledPrefix) {
+            const comboCounts = new Map();
+            const bls = blocks.map(b => b.text.length);
+            const usedS = new Array(blocks.length);
+            const usedE = new Array(blocks.length);
+            const combo = new Array(blocks.length);
+
+            for (const word of candidates) {
+                if (blocks.some(b => !word.includes(b.text))) continue; // fast pre-filter
+                const validPos = blocks.map((block, bi) => {
+                    const bl = bls[bi], pos = [];
+                    for (let i = 0; i <= word.length - bl; i++) {
+                        if (!hasFilledInRange(filledPrefix, i, bl) && word.startsWith(block.text, i)) pos.push(i);
+                    }
+                    return pos;
+                });
+                if (validPos.some(p => p.length === 0)) continue;
+
+                function bt(idx, uc) {
+                    if (idx === blocks.length) {
+                        const key = combo.join(':');
+                        comboCounts.set(key, (comboCounts.get(key) || 0) + 1);
+                        return;
+                    }
+                    const bl = bls[idx];
+                    outer: for (const pos of validPos[idx]) {
+                        const end = pos + bl - 1;
+                        for (let j = 0; j < uc; j++) { if (!(end < usedS[j] || pos > usedE[j])) continue outer; }
+                        usedS[uc] = pos; usedE[uc] = end; combo[idx] = pos;
+                        bt(idx + 1, uc + 1);
+                    }
+                }
+                bt(0, 0);
+            }
+            return [...comboCounts.entries()]
+                .sort((a, b) => b[1] - a[1]).slice(0, 5)
+                .map(([k, count]) => ({ positions: k.split(':').map(Number).map(p => p + 1), count, blocks }));
+        }
+
+        function renderBlockChip(block) {
+            return `<span style="background-color:${block.color};padding:1px 6px;border:1px solid rgba(0,0,0,0.25);font-family:'Banana Grotesk',sans-serif;">${block.text.toUpperCase()}</span>`;
+        }
+
+        let posAnalysisExpanded = true;
+
+        function togglePositionAnalysis() {
+            posAnalysisExpanded = !posAnalysisExpanded;
+            const resultsEl = document.getElementById('posAnalysisResults');
+            const btn = document.getElementById('posAnalysisToggle');
+            if (resultsEl) resultsEl.style.display = posAnalysisExpanded ? '' : 'none';
+            if (btn) btn.textContent = posAnalysisExpanded ? '−' : '+';
+        }
+
+        function runPositionAnalysis() {
+            const section = document.getElementById('posAnalysisSection');
+            const resultsEl = document.getElementById('posAnalysisResults');
+            if (!section || !resultsEl) return;
+
+            if (requiredBlocks.length === 0) { section.style.display = 'none'; return; }
+
+            // Filter candidates by current letter-box pattern
+            const raw = wordBuckets[wordLength] || [];
+            const withoutRemoved = removedWords.size > 0 ? raw.filter(w => !removedWords.has(w)) : raw;
+            const candidates = letterBoxes.some(b => b !== '')
+                ? withoutRemoved.filter(w => matchesPattern(w, letterBoxes))
+                : withoutRemoved;
+
+            if (candidates.length === 0) { section.style.display = 'none'; return; }
+            const total = candidates.length;
+            const filledPrefix = buildFilledPrefix(letterBoxes);
+
+            let html = '';
+
+            // Cascading joint section: all N together, then N-1, N-2, ... down to 2
+            if (requiredBlocks.length >= 2) {
+                const n = requiredBlocks.length;
+                for (let k = n; k >= 2; k--) {
+                    const subsets = getSubsets(requiredBlocks, k);
+                    // collect top combo per subset, then sort across subsets by count
+                    const tier = [];
+                    for (const subset of subsets) {
+                        const combos = computeJointPlacementsN(subset, candidates, filledPrefix);
+                        if (combos.length > 0) tier.push(combos[0]); // best for this subset
+                    }
+                    if (tier.length === 0) continue;
+                    tier.sort((a, b) => b.count - a.count);
+                    const showTop = tier.slice(0, k === n ? 5 : 3);
+                    const label = k === n ? 'best together' : `best ${k}/${n}`;
+                    html += `<div style="margin-bottom:16px;">
+                        <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.75rem;font-weight:700;letter-spacing:0.06em;margin-bottom:5px;color:${k === n ? '#000' : '#555'};">
+                            ${k === n ? showTop[0].blocks.map(b => renderBlockChip(b)).join(' + ') : `${k} of ${n}`} &mdash; ${label}
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:3px;">`;
+                    showTop.forEach((combo, i) => {
+                        html += `<div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-family:'Banana Grotesk',sans-serif;font-size:0.73rem;${i === 0 && k === n ? 'font-weight:700;' : 'color:#555;'}">`;
+                        combo.positions.forEach((pos, pi) => {
+                            if (pi > 0) html += `<span style="color:#aaa;font-size:0.65rem;">+</span>`;
+                            html += `${renderBlockChip(combo.blocks[pi])}<span style="font-size:0.62rem;margin-left:2px;">@${pos}</span>`;
+                        });
+                        html += `<span style="color:#888;font-weight:400;margin-left:3px;">${combo.count.toLocaleString()} words</span></div>`;
+                    });
+                    html += `</div></div>`;
+                }
+            }
+
+            // Per-block bar charts — independent, no cross-block requirement
+            for (const block of requiredBlocks) {
+                const counts = analyzeBlockPositionsFiltered(block.text, [], candidates, filledPrefix);
+                if (counts.length === 0) continue;
+                const bl = block.text.length;
+                // Best position = highest count among non-filled positions
+                const max = Math.max(...counts.filter((_, i) => !hasFilledInRange(filledPrefix, i, bl)));
+                if (max === 0) continue;
+                const bestPos = counts.findIndex((c, i) => c === max && !hasFilledInRange(filledPrefix, i, bl)) + 1;
+                const color = block.color;
+
+                html += `<div style="margin-bottom:14px;">
+                    <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.78rem;font-weight:700;letter-spacing:0.08em;margin-bottom:6px;">
+                        ${renderBlockChip(block)} &mdash; best at position ${bestPos}
+                        <span style="font-weight:400;color:#555;">(${max.toLocaleString()} / ${total.toLocaleString()} words)</span>
+                    </div>
+                    <div style="display:flex;gap:3px;align-items:flex-end;">`;
+                for (let i = 0; i < counts.length; i++) {
+                    const taken = hasFilledInRange(filledPrefix, i, bl);
+                    if (taken) {
+                        html += `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;min-width:30px;">
+                            <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.58rem;color:#bbb;line-height:1;">×</div>
+                            <div style="width:28px;height:10px;background-color:#ccc;border:1px solid rgba(0,0,0,0.1);flex-shrink:0;"></div>
+                            <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.65rem;color:#aaa;line-height:1;">${i + 1}</div>
+                        </div>`;
+                    } else {
+                        const ratio = max > 0 ? counts[i] / max : 0;
+                        const barH = Math.round(10 + ratio * 52);
+                        const opacity = (0.18 + ratio * 0.82).toFixed(2);
+                        const isBest = counts[i] === max;
+                        const border = isBest ? '2px solid #000' : '1px solid rgba(0,0,0,0.18)';
+                        html += `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;min-width:30px;">
+                            <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.58rem;color:#444;line-height:1;">${counts[i].toLocaleString()}</div>
+                            <div style="width:28px;height:${barH}px;background-color:${color};opacity:${opacity};border:${border};flex-shrink:0;"></div>
+                            <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.65rem;font-weight:${isBest ? '700' : '400'};line-height:1;">${i + 1}</div>
+                        </div>`;
+                    }
+                }
+                html += `</div></div>`;
+            }
+
+            resultsEl.innerHTML = html;
+            section.style.display = '';
+            resultsEl.style.display = posAnalysisExpanded ? '' : 'none';
+        }
+
+        const schedulePositionAnalysis = debounce(runPositionAnalysis, 80);
+
         document.getElementById('wordLength').addEventListener('change', (e) => {
             wordLength = parseInt(e.target.value);
             initializeBoxes();
             scheduleUpdateResults();
             updateClearButton();
+            schedulePositionAnalysis();
         });
         document.getElementById('addBlock').addEventListener('click', addBlock);
         document.getElementById('blockInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') addBlock(); });
         document.getElementById('clearAll').addEventListener('click', clearAllBoxes);
-        document.getElementById('clearBlocksAll')?.addEventListener('click', () => { requiredBlocks = []; updateBlocksList(); scheduleUpdateResults(); });
+        document.getElementById('clearBlocksAll')?.addEventListener('click', () => { requiredBlocks = []; updateBlocksList(); scheduleUpdateResults(); schedulePositionAnalysis(); });
         document.getElementById('filterByBlocks')?.addEventListener('change', (e) => { filterByBlocks = !!e.target.checked; scheduleUpdateResults(); });
+        document.getElementById('clearSavedAll')?.addEventListener('click', () => { savedWords = []; persistSavedWords(); updateSavedWordsPanel(); scheduleUpdateResults(); });
 
         function moveActiveTo(index) {
             if (index == null) { activeBox = null; }
@@ -787,6 +1227,8 @@
         });
 
         initializeBoxes();
+        loadRemovedWords();
+        loadSavedWords();
 
         // Create a small hidden input that receives focus on mobile to open the soft keyboard
         function createHiddenInput() {
