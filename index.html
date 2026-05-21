@@ -279,7 +279,10 @@
             <div id="savedWordsSection" class="mb-5" style="display: none;">
                 <div class="flex items-center justify-between mb-2">
                     <label class="block text-sm font-semibold text-gray-700">Saved Words <span id="savedWordsBadge" class="text-gray-400 font-normal text-xs"></span></label>
-                    <button id="clearSavedAll" class="clear-blocks-btn" title="Clear all saved words"><span class="icon">×</span><span class="label">Clear All</span></button>
+                    <div class="flex gap-2">
+                        <button id="savedWordsToggle" type="button" onclick="toggleSavedWords()" title="Collapse" style="background:none;border:2px solid #000!important;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1rem;font-weight:700;line-height:1;padding:0;font-family:'Banana Grotesk',sans-serif;">−</button>
+                        <button id="clearSavedAll" class="clear-blocks-btn" title="Clear all saved words"><span class="icon">×</span><span class="label">Clear All</span></button>
+                    </div>
                 </div>
                 <div id="savedWordsList" class="grid grid-cols-1 sm:grid-cols-2 gap-1"></div>
             </div>
@@ -293,7 +296,8 @@
                     </h2>
                     <div class="flex items-center gap-3 flex-wrap">
                         <span id="hiddenWordsNotice" style="display:none; font-family:'Banana Grotesk',sans-serif; font-size:0.75rem; color:#888;">
-                            <span id="hiddenWordsCount">0</span> hidden &middot;
+                            <button type="button" onclick="toggleHiddenWordsList()" style="background:none;border:none!important;color:#888;cursor:pointer;font-size:0.75rem;padding:0;font-family:'Banana Grotesk',sans-serif;"><span id="hiddenWordsCount">0</span> hidden ▾</button>
+                            &middot;
                             <button type="button" onclick="restoreAllRemovedWords()" style="background:none;border:none!important;color:#189973;cursor:pointer;font-size:0.75rem;padding:0;font-family:'Banana Grotesk',sans-serif;text-decoration:underline;">restore all</button>
                         </span>
                         <label class="text-sm text-gray-600 flex items-center gap-2">
@@ -302,6 +306,7 @@
                         </label>
                     </div>
                 </div>
+                <div id="hiddenWordsList" style="display:none; flex-wrap:wrap; gap:4px; margin-bottom:8px; padding:6px; background:#eff0ea; border:2px solid #000;"></div>
                 <div id="resultsContainer" class="text-center py-10 bg-gray-50 rounded-lg border-2 border-gray-200">
                     <p class="text-gray-400 text-sm">Click boxes above to start searching</p>
                 </div>
@@ -329,6 +334,9 @@
         const SAVED_WORDS_KEY = 'gubbins-saved-words';
         let removedWords = new Set();
         const REMOVED_WORDS_KEY = 'gubbins-removed-words';
+        const pendingRemovals = new Set();
+        let bestPositionCombo = null; // [{blockIndex, start(0-indexed)}] from latest analysis
+        let savedWordsExpanded = true;
 
         function clearBuckets() {
             for (const k in wordBuckets) delete wordBuckets[k];
@@ -595,10 +603,20 @@
             }
         }
 
+        function matchesBestCombo(placements) {
+            if (!bestPositionCombo || !bestPositionCombo.length) return false;
+            return bestPositionCombo.every(bp =>
+                placements.some(p => p.blockIndex === bp.blockIndex && p.start === bp.start)
+            );
+        }
+
         // Render helper reused by both sync and worker paths
         function renderResultsFromMeta(resultsWithMeta, options = {}) {
             if (!options.skipSort) {
                 resultsWithMeta.sort((a, b) => {
+                    const aTop = matchesBestCombo(a.match.placements) ? 1 : 0;
+                    const bTop = matchesBestCombo(b.match.placements) ? 1 : 0;
+                    if (bTop !== aTop) return bTop - aTop;
                     if (b.match.count !== a.match.count) return b.match.count - a.match.count;
                     if (b.match.totalLength !== a.match.totalLength) return b.match.totalLength - a.match.totalLength;
                     return a.word.localeCompare(b.word);
@@ -869,19 +887,69 @@
         function updateHiddenWordsNotice() {
             const notice = document.getElementById('hiddenWordsNotice');
             const countEl = document.getElementById('hiddenWordsCount');
+            const listEl = document.getElementById('hiddenWordsList');
             if (!notice) return;
             if (removedWords.size > 0) {
                 if (countEl) countEl.textContent = removedWords.size;
                 notice.style.display = '';
+                if (listEl && listEl.style.display !== 'none') {
+                    listEl.innerHTML = [...removedWords].sort().map(w =>
+                        `<span style="display:inline-flex;align-items:center;gap:2px;border:2px solid #000;padding:2px 6px;background:#fff;font-family:'Banana Grotesk',sans-serif;font-size:0.75rem;letter-spacing:0.08em;">
+                            ${w.toUpperCase()}
+                            <button type="button" onclick="restoreWord('${w}')" title="Restore" style="background:none;border:none!important;color:#189973;cursor:pointer;font-size:0.9rem;padding:0 2px;line-height:1;">↩</button>
+                        </span>`
+                    ).join('');
+                }
             } else {
                 notice.style.display = 'none';
+                if (listEl) listEl.style.display = 'none';
             }
         }
 
+        function toggleHiddenWordsList() {
+            const listEl = document.getElementById('hiddenWordsList');
+            if (!listEl) return;
+            const opening = listEl.style.display === 'none';
+            listEl.style.display = opening ? 'flex' : 'none';
+            if (opening) updateHiddenWordsNotice(); // populate on open
+        }
+
+        function restoreWord(word) {
+            removedWords.delete(word);
+            persistRemovedWords();
+            updateHiddenWordsNotice();
+            scheduleUpdateResults();
+        }
+
         function removeWordFromCache(word) {
+            if (!pendingRemovals.has(word)) {
+                // First click — highlight tile and wait for confirmation
+                pendingRemovals.add(word);
+                document.querySelectorAll('.result-tile').forEach(tile => {
+                    if (tile.querySelector(`.save-word-btn[data-word="${word}"]`)) {
+                        const btn = tile.querySelector('.remove-word-btn');
+                        if (btn) { btn.style.color = '#c0392b'; btn.style.fontSize = '1rem'; }
+                        tile.style.outline = '2px solid #c0392b';
+                        tile.style.outlineOffset = '-2px';
+                    }
+                });
+                setTimeout(() => {
+                    if (!pendingRemovals.has(word)) return;
+                    pendingRemovals.delete(word);
+                    document.querySelectorAll('.result-tile').forEach(tile => {
+                        if (tile.querySelector(`.save-word-btn[data-word="${word}"]`)) {
+                            const btn = tile.querySelector('.remove-word-btn');
+                            if (btn) { btn.style.color = ''; btn.style.fontSize = ''; }
+                            tile.style.outline = '';
+                        }
+                    });
+                }, 3000);
+                return;
+            }
+            // Second click — confirmed, remove
+            pendingRemovals.delete(word);
             removedWords.add(word);
             persistRemovedWords();
-            // Remove tile(s) from DOM immediately for instant feedback
             document.querySelectorAll('.result-tile').forEach(tile => {
                 if (tile.querySelector(`.save-word-btn[data-word="${word}"]`)) tile.remove();
             });
@@ -893,6 +961,8 @@
         function restoreAllRemovedWords() {
             removedWords = new Set();
             persistRemovedWords();
+            const listEl = document.getElementById('hiddenWordsList');
+            if (listEl) listEl.style.display = 'none';
             updateHiddenWordsNotice();
             scheduleUpdateResults();
         }
@@ -948,14 +1018,29 @@
             }
             updateBoxDisplay();
             updateClearButton();
-            requiredBlocks = saved.blocks.map(b => ({...b}));
-            updateBlocksList();
             scheduleUpdateResults();
             schedulePositionAnalysis();
         }
 
-        function renderSavedWordHtml(word, placements, blocks) {
+        function toggleSavedWords() {
+            savedWordsExpanded = !savedWordsExpanded;
+            const list = document.getElementById('savedWordsList');
+            const btn = document.getElementById('savedWordsToggle');
+            if (list) list.style.display = savedWordsExpanded ? '' : 'none';
+            if (btn) btn.textContent = savedWordsExpanded ? '−' : '+';
+        }
+
+        const FILL_COLORS = ['#e9bba4','#e7b465','#f6e29b','#e4db4e','#b3be9e','#bec4dc','#ceb7cb'];
+
+        function renderSavedWordHtml(word, placements, blocks, savedLetterBoxes) {
             const colorMap = Array(word.length).fill(null);
+            // Fill-color-cycle for manually typed letter box positions
+            if (savedLetterBoxes) {
+                for (let i = 0; i < Math.min(savedLetterBoxes.length, word.length); i++) {
+                    if (savedLetterBoxes[i]) colorMap[i] = FILL_COLORS[i % 7];
+                }
+            }
+            // Block placement colors override (higher priority)
             for (const p of (placements || [])) {
                 const block = blocks[p.blockIndex];
                 if (block) {
@@ -972,6 +1057,42 @@
             return html;
         }
 
+        let _positionCombos = [];
+
+        function applyPositionCombo(idx) {
+            const combo = _positionCombos[idx];
+            if (!combo) return;
+            for (const { start, text } of combo) {
+                for (let j = 0; j < text.length; j++) {
+                    if (start + j < letterBoxes.length) letterBoxes[start + j] = text[j].toUpperCase();
+                }
+            }
+            updateBoxDisplay();
+            updateClearButton();
+            scheduleUpdateResults();
+        }
+
+        // placements: [{start, length, color, text?}]
+        function renderPositionPreview(wLen, placements) {
+            const colorMap = Array(wLen).fill(null);
+            const letterMap = Array(wLen).fill('');
+            for (const { start, length, color, text } of placements) {
+                for (let i = 0; i < length; i++) {
+                    colorMap[start + i] = color;
+                    if (text) letterMap[start + i] = text[i] || '';
+                }
+            }
+            let html = `<span style="display:inline-flex;gap:1px;align-items:center;vertical-align:middle;flex-shrink:0;">`;
+            for (let i = 0; i < wLen; i++) {
+                const bg = colorMap[i] ? darkenHex(colorMap[i], 10) : '#d5d0c5';
+                const border = colorMap[i] ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.1)';
+                const letter = letterMap[i] ? letterMap[i].toUpperCase() : '';
+                html += `<span style="width:15px;height:15px;background:${bg};display:inline-flex;align-items:center;justify-content:center;border:1px solid ${border};font-family:'Banana Grotesk',sans-serif;font-size:8px;font-weight:700;line-height:1;">${letter}</span>`;
+            }
+            html += `</span>`;
+            return html;
+        }
+
         function updateSavedWordsPanel() {
             const section = document.getElementById('savedWordsSection');
             const badge = document.getElementById('savedWordsBadge');
@@ -980,13 +1101,18 @@
             if (badge) badge.textContent = savedWords.length ? `(${savedWords.length})` : '';
             if (savedWords.length === 0) { section.style.display = 'none'; return; }
             section.style.display = '';
+            list.style.display = savedWordsExpanded ? '' : 'none';
             list.innerHTML = savedWords.map(saved => {
-                const patternPreview = saved.letterBoxes.map(l => l || '·').join('');
-                const wordHtml = renderSavedWordHtml(saved.word, saved.placements, saved.blocks);
+                const wordHtml = renderSavedWordHtml(saved.word, saved.placements, saved.blocks, saved.letterBoxes);
+                const preview = renderPositionPreview(saved.wordLength, (saved.placements || []).map(p => ({
+                    start: p.start, length: p.length,
+                    color: (saved.blocks[p.blockIndex] || {}).color || '#ccc',
+                    text: saved.word.substring(p.start, p.start + p.length)
+                })));
                 return `<div class="saved-word-item">
                     <button type="button" class="restore-saved-btn" onclick="restoreSavedWord('${saved.id}')">
                         <span class="saved-word-text">${wordHtml}</span>
-                        <span class="saved-word-meta">${patternPreview}</span>
+                        <span class="saved-word-meta" style="display:flex;align-items:center;gap:4px;margin-top:3px;">${preview}</span>
                     </button>
                     <button type="button" class="remove-saved-btn" onclick="removeSavedWord('${saved.id}')" title="Remove">×</button>
                 </div>`;
@@ -1096,34 +1222,49 @@
             const filledPrefix = buildFilledPrefix(letterBoxes);
 
             let html = '';
+            bestPositionCombo = null;
+            _positionCombos = [];
 
             // Cascading joint section: all N together, then N-1, N-2, ... down to 2
             if (requiredBlocks.length >= 2) {
                 const n = requiredBlocks.length;
                 for (let k = n; k >= 2; k--) {
                     const subsets = getSubsets(requiredBlocks, k);
-                    // collect top combo per subset, then sort across subsets by count
+                    // collect ALL combos from every subset so no position pair is hidden
                     const tier = [];
                     for (const subset of subsets) {
                         const combos = computeJointPlacementsN(subset, candidates, filledPrefix);
-                        if (combos.length > 0) tier.push(combos[0]); // best for this subset
+                        tier.push(...combos); // all position pairs, not just the best one
                     }
                     if (tier.length === 0) continue;
                     tier.sort((a, b) => b.count - a.count);
-                    const showTop = tier.slice(0, k === n ? 5 : 3);
-                    const label = k === n ? 'best together' : `best ${k}/${n}`;
+                    // Store the very first combo found (highest tier, highest count) as the best
+                    if (!bestPositionCombo) {
+                        const top = tier[0];
+                        bestPositionCombo = top.positions.map((pos, pi) => ({
+                            blockIndex: requiredBlocks.indexOf(top.blocks[pi]),
+                            start: pos - 1
+                        }));
+                    }
+                    const showTop = tier; // show every subset — no truncation in partial tiers
+                    const label = k === n ? 'best together' : `${k} of ${n}`;
                     html += `<div style="margin-bottom:16px;">
-                        <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.75rem;font-weight:700;letter-spacing:0.06em;margin-bottom:5px;color:${k === n ? '#000' : '#555'};">
-                            ${k === n ? showTop[0].blocks.map(b => renderBlockChip(b)).join(' + ') : `${k} of ${n}`} &mdash; ${label}
+                        <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.75rem;font-weight:700;letter-spacing:0.06em;margin-bottom:5px;color:${k === n ? '#000' : '#666'};">
+                            ${k === n ? showTop[0].blocks.map(b => renderBlockChip(b)).join(' + ') + ' &mdash; best together' : label}
                         </div>
-                        <div style="display:flex;flex-direction:column;gap:3px;">`;
+                        <div style="display:flex;flex-direction:column;gap:4px;">`;
                     showTop.forEach((combo, i) => {
-                        html += `<div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-family:'Banana Grotesk',sans-serif;font-size:0.73rem;${i === 0 && k === n ? 'font-weight:700;' : 'color:#555;'}">`;
-                        combo.positions.forEach((pos, pi) => {
-                            if (pi > 0) html += `<span style="color:#aaa;font-size:0.65rem;">+</span>`;
-                            html += `${renderBlockChip(combo.blocks[pi])}<span style="font-size:0.62rem;margin-left:2px;">@${pos}</span>`;
-                        });
-                        html += `<span style="color:#888;font-weight:400;margin-left:3px;">${combo.count.toLocaleString()} words</span></div>`;
+                        const prevPlacements = combo.positions.map((pos, pi) => ({
+                            start: pos - 1, length: combo.blocks[pi].text.length,
+                            color: combo.blocks[pi].color, text: combo.blocks[pi].text
+                        }));
+                        const comboIdx = _positionCombos.length;
+                        _positionCombos.push(prevPlacements.map(p => ({ start: p.start, text: p.text })));
+                        const chips = combo.blocks.map(b => renderBlockChip(b)).join(' ');
+                        html += `<div onclick="applyPositionCombo(${comboIdx})" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-family:'Banana Grotesk',sans-serif;font-size:0.73rem;cursor:pointer;padding:3px 4px;transition:background 100ms;${i === 0 && k === n ? 'font-weight:700;' : 'color:#555;'}" onmouseover="this.style.background='rgba(0,0,0,0.04)'" onmouseout="this.style.background=''">
+                            ${k < n ? chips + ' ' : ''}${renderPositionPreview(wordLength, prevPlacements)}
+                            <span style="color:#888;font-weight:400;">${combo.count.toLocaleString()} words</span>
+                        </div>`;
                     });
                     html += `</div></div>`;
                 }
