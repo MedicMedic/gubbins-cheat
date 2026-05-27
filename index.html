@@ -245,7 +245,10 @@
             <div class="mb-6">
                 <div class="flex items-center justify-between mb-2">
                     <label class="block text-sm font-semibold text-gray-700">Fill in the blanks</label>
-                    <button id="clearAll" class="clear-blocks-btn" title="Clear all letters" style="display: none;"><span class="icon">×</span><span class="label">Clear All</span></button>
+                    <div class="flex gap-2">
+                        <button id="undoBtn" class="clear-blocks-btn" title="Undo last action" style="display:none;" onclick="undo()"><span class="icon">↩</span><span class="label">Undo</span></button>
+                        <button id="clearAll" class="clear-blocks-btn" title="Clear all letters" style="display: none;"><span class="icon">×</span><span class="label">Clear All</span></button>
+                    </div>
                 </div>
                 <div id="letterBoxes" class="mb-3"></div>
 
@@ -297,8 +300,6 @@
                     <div class="flex items-center gap-3 flex-wrap">
                         <span id="hiddenWordsNotice" style="display:none; font-family:'Banana Grotesk',sans-serif; font-size:0.75rem; color:#888;">
                             <button type="button" onclick="toggleHiddenWordsList()" style="background:none;border:none!important;color:#888;cursor:pointer;font-size:0.75rem;padding:0;font-family:'Banana Grotesk',sans-serif;"><span id="hiddenWordsCount">0</span> hidden ▾</button>
-                            &middot;
-                            <button type="button" onclick="restoreAllRemovedWords()" style="background:none;border:none!important;color:#189973;cursor:pointer;font-size:0.75rem;padding:0;font-family:'Banana Grotesk',sans-serif;text-decoration:underline;">restore all</button>
                         </span>
                         <label class="text-sm text-gray-600 flex items-center gap-2">
                             <input type="checkbox" id="filterByBlocks" />
@@ -337,6 +338,7 @@
         const pendingRemovals = new Set();
         let bestPositionCombo = null; // [{blockIndex, start(0-indexed)}] from latest analysis
         let savedWordsExpanded = true;
+        let _undoState = null;
 
         function clearBuckets() {
             for (const k in wordBuckets) delete wordBuckets[k];
@@ -761,6 +763,7 @@
 
         function handleLetterInput(letter) {
             if (activeBox !== null) {
+                saveUndoState();
                 letterBoxes[activeBox] = letter;
                 updateBoxDisplay();
                 const nextEmpty = letterBoxes.findIndex((b, i) => i > activeBox && b === '');
@@ -774,6 +777,7 @@
         }
 
         function clearBox(index) {
+            saveUndoState();
             letterBoxes[index] = '';
             updateBoxDisplay();
             scheduleUpdateResults();
@@ -782,6 +786,7 @@
         }
 
         function clearAllBoxes() {
+            saveUndoState();
             letterBoxes = Array(wordLength).fill('');
             activeBox = null;
             updateBoxDisplay();
@@ -832,10 +837,56 @@
             if (btn) btn.style.display = letterBoxes.some(b => b !== '') ? 'inline-flex' : 'none';
         }
 
+        function saveUndoState() {
+            _undoState = {
+                letterBoxes: letterBoxes.slice(),
+                requiredBlocks: requiredBlocks.map(b => ({...b})),
+                removedWords: new Set(removedWords)
+            };
+            updateUndoButton();
+        }
+
+        function updateUndoButton() {
+            const btn = document.getElementById('undoBtn');
+            if (btn) btn.style.display = _undoState ? 'inline-flex' : 'none';
+        }
+
+        function undo() {
+            if (!_undoState) return;
+            letterBoxes = _undoState.letterBoxes;
+            requiredBlocks = _undoState.requiredBlocks;
+            removedWords = _undoState.removedWords;
+            _undoState = null;
+            updateUndoButton();
+            updateBoxDisplay();
+            updateBoxStyles();
+            updateBlocksList();
+            updateClearButton();
+            persistRemovedWords();
+            updateHiddenWordsNotice();
+            scheduleUpdateResults();
+            schedulePositionAnalysis();
+        }
+
+        function copyHiddenWordsList() {
+            const text = [...removedWords].sort().join('\n');
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text);
+            } else {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+            }
+        }
+
         function addBlock() {
             const input = document.getElementById('blockInput');
             const text = input.value.trim().toLowerCase();
             if (!text) return;
+            saveUndoState();
             const id = 'b' + (_blockIdCounter++).toString(36) + '-' + Date.now().toString(36);
             const color = BLOCK_PALETTE[Math.floor(Math.random() * BLOCK_PALETTE.length)];
             requiredBlocks.push({ id, text, color });
@@ -846,6 +897,7 @@
         }
 
         function removeBlock(id) {
+            saveUndoState();
             requiredBlocks = requiredBlocks.filter(b => b.id !== id);
             updateBlocksList();
             scheduleUpdateResults();
@@ -893,12 +945,17 @@
                 if (countEl) countEl.textContent = removedWords.size;
                 notice.style.display = '';
                 if (listEl && listEl.style.display !== 'none') {
-                    listEl.innerHTML = [...removedWords].sort().map(w =>
+                    const wordChips = [...removedWords].sort().map(w =>
                         `<span style="display:inline-flex;align-items:center;gap:2px;border:2px solid #000;padding:2px 6px;background:#fff;font-family:'Banana Grotesk',sans-serif;font-size:0.75rem;letter-spacing:0.08em;">
                             ${w.toUpperCase()}
                             <button type="button" onclick="restoreWord('${w}')" title="Restore" style="background:none;border:none!important;color:#189973;cursor:pointer;font-size:0.9rem;padding:0 2px;line-height:1;">↩</button>
                         </span>`
                     ).join('');
+                    listEl.innerHTML = `<div style="width:100%;display:flex;gap:8px;align-items:center;margin-bottom:6px;padding-bottom:5px;border-bottom:1px solid #ccc;">
+                        <button type="button" onclick="restoreAllRemovedWords()" style="background:none;border:none!important;color:#189973;cursor:pointer;font-size:0.75rem;padding:0;font-family:'Banana Grotesk',sans-serif;text-decoration:underline;">restore all</button>
+                        <span style="color:#ccc;">·</span>
+                        <button type="button" onclick="copyHiddenWordsList()" style="background:none;border:none!important;color:#888;cursor:pointer;font-size:0.75rem;padding:0;font-family:'Banana Grotesk',sans-serif;text-decoration:underline;">copy list</button>
+                    </div>` + wordChips;
                 }
             } else {
                 notice.style.display = 'none';
@@ -915,6 +972,7 @@
         }
 
         function restoreWord(word) {
+            saveUndoState();
             removedWords.delete(word);
             persistRemovedWords();
             updateHiddenWordsNotice();
@@ -947,6 +1005,7 @@
                 return;
             }
             // Second click — confirmed, remove
+            saveUndoState();
             pendingRemovals.delete(word);
             removedWords.add(word);
             persistRemovedWords();
@@ -959,6 +1018,7 @@
         }
 
         function restoreAllRemovedWords() {
+            saveUndoState();
             removedWords = new Set();
             persistRemovedWords();
             const listEl = document.getElementById('hiddenWordsList');
@@ -1007,6 +1067,7 @@
         function restoreSavedWord(id) {
             const saved = savedWords.find(s => s.id === id);
             if (!saved) return;
+            saveUndoState();
             wordLength = saved.wordLength;
             document.getElementById('wordLength').value = wordLength;
             initializeBoxes();
@@ -1062,14 +1123,36 @@
         function applyPositionCombo(idx) {
             const combo = _positionCombos[idx];
             if (!combo) return;
+            saveUndoState();
             for (const { start, text } of combo) {
                 for (let j = 0; j < text.length; j++) {
                     if (start + j < letterBoxes.length) letterBoxes[start + j] = text[j].toUpperCase();
                 }
             }
+            const usedIds = new Set(combo.map(p => p.blockId).filter(Boolean));
+            if (usedIds.size > 0) {
+                requiredBlocks = requiredBlocks.filter(b => !usedIds.has(b.id));
+                updateBlocksList();
+            }
             updateBoxDisplay();
             updateClearButton();
             scheduleUpdateResults();
+            schedulePositionAnalysis();
+        }
+
+        function applyBarPosition(blockId, positionIdx) {
+            const block = requiredBlocks.find(b => b.id === blockId);
+            if (!block) return;
+            saveUndoState();
+            for (let j = 0; j < block.text.length; j++) {
+                if (positionIdx + j < letterBoxes.length) letterBoxes[positionIdx + j] = block.text[j].toUpperCase();
+            }
+            requiredBlocks = requiredBlocks.filter(b => b.id !== blockId);
+            updateBlocksList();
+            updateBoxDisplay();
+            updateClearButton();
+            scheduleUpdateResults();
+            schedulePositionAnalysis();
         }
 
         // placements: [{start, length, color, text?}]
@@ -1170,8 +1253,14 @@
 
                 function bt(idx, uc) {
                     if (idx === blocks.length) {
-                        const key = combo.join(':');
-                        comboCounts.set(key, (comboCounts.get(key) || 0) + 1);
+                        // Normalize: sort (position, text) pairs so same-text blocks at swapped positions deduplicate
+                        const pairs = combo.map((pos, i) => [pos, blocks[i].text, i])
+                            .sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]));
+                        const key = pairs.map(([p, t]) => `${p}:${t}`).join('|');
+                        if (!comboCounts.has(key)) {
+                            comboCounts.set(key, { count: 0, sortedIndices: pairs.map(([,, i]) => i) });
+                        }
+                        comboCounts.get(key).count++;
                         return;
                     }
                     const bl = bls[idx];
@@ -1185,8 +1274,12 @@
                 bt(0, 0);
             }
             return [...comboCounts.entries()]
-                .sort((a, b) => b[1] - a[1]).slice(0, 5)
-                .map(([k, count]) => ({ positions: k.split(':').map(Number).map(p => p + 1), count, blocks }));
+                .sort((a, b) => b[1].count - a[1].count).slice(0, 5)
+                .map(([k, { count, sortedIndices }]) => ({
+                    positions: k.split('|').map(part => parseInt(part) + 1),
+                    count,
+                    blocks: sortedIndices.map(i => blocks[i])
+                }));
         }
 
         function renderBlockChip(block) {
@@ -1225,48 +1318,57 @@
             bestPositionCombo = null;
             _positionCombos = [];
 
-            // Cascading joint section: all N together, then N-1, N-2, ... down to 2
+            // Joint section: collect all combos from all subset sizes, group by total letters filled
             if (requiredBlocks.length >= 2) {
                 const n = requiredBlocks.length;
+                const allCombos = [];
                 for (let k = n; k >= 2; k--) {
-                    const subsets = getSubsets(requiredBlocks, k);
-                    // collect ALL combos from every subset so no position pair is hidden
-                    const tier = [];
-                    for (const subset of subsets) {
-                        const combos = computeJointPlacementsN(subset, candidates, filledPrefix);
-                        tier.push(...combos); // all position pairs, not just the best one
+                    for (const subset of getSubsets(requiredBlocks, k)) {
+                        allCombos.push(...computeJointPlacementsN(subset, candidates, filledPrefix));
                     }
-                    if (tier.length === 0) continue;
-                    tier.sort((a, b) => b.count - a.count);
-                    // Store the very first combo found (highest tier, highest count) as the best
-                    if (!bestPositionCombo) {
-                        const top = tier[0];
-                        bestPositionCombo = top.positions.map((pos, pi) => ({
-                            blockIndex: requiredBlocks.indexOf(top.blocks[pi]),
-                            start: pos - 1
-                        }));
+                }
+                if (allCombos.length > 0) {
+                    // Group by total letters covered
+                    const groups = new Map();
+                    for (const combo of allCombos) {
+                        const letters = combo.blocks.reduce((s, b) => s + b.text.length, 0);
+                        if (!groups.has(letters)) groups.set(letters, []);
+                        groups.get(letters).push(combo);
                     }
-                    const showTop = tier; // show every subset — no truncation in partial tiers
-                    const label = k === n ? 'best together' : `${k} of ${n}`;
-                    html += `<div style="margin-bottom:16px;">
-                        <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.75rem;font-weight:700;letter-spacing:0.06em;margin-bottom:5px;color:${k === n ? '#000' : '#666'};">
-                            ${k === n ? showTop[0].blocks.map(b => renderBlockChip(b)).join(' + ') + ' &mdash; best together' : label}
-                        </div>
-                        <div style="display:flex;flex-direction:column;gap:4px;">`;
-                    showTop.forEach((combo, i) => {
-                        const prevPlacements = combo.positions.map((pos, pi) => ({
-                            start: pos - 1, length: combo.blocks[pi].text.length,
-                            color: combo.blocks[pi].color, text: combo.blocks[pi].text
-                        }));
-                        const comboIdx = _positionCombos.length;
-                        _positionCombos.push(prevPlacements.map(p => ({ start: p.start, text: p.text })));
-                        const chips = combo.blocks.map(b => renderBlockChip(b)).join(' ');
-                        html += `<div onclick="applyPositionCombo(${comboIdx})" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-family:'Banana Grotesk',sans-serif;font-size:0.73rem;cursor:pointer;padding:3px 4px;transition:background 100ms;${i === 0 && k === n ? 'font-weight:700;' : 'color:#555;'}" onmouseover="this.style.background='rgba(0,0,0,0.04)'" onmouseout="this.style.background=''">
-                            ${k < n ? chips + ' ' : ''}${renderPositionPreview(wordLength, prevPlacements)}
-                            <span style="color:#888;font-weight:400;">${combo.count.toLocaleString()} words</span>
-                        </div>`;
+                    // Sort groups most-letters first; within each group sort by word count
+                    const sortedGroups = [...groups.entries()].sort((a, b) => b[0] - a[0]);
+                    sortedGroups.forEach(([, combos]) => combos.sort((a, b) => b.count - a.count));
+
+                    // Best combo = top of the highest-letter group
+                    const topCombo = sortedGroups[0][1][0];
+                    bestPositionCombo = topCombo.positions.map((pos, pi) => ({
+                        blockIndex: requiredBlocks.indexOf(topCombo.blocks[pi]),
+                        start: pos - 1
+                    }));
+
+                    const topLetters = sortedGroups[0][0];
+                    sortedGroups.forEach(([letters, combos]) => {
+                        const isTop = letters === topLetters;
+                        html += `<div style="margin-bottom:16px;">
+                            <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.75rem;font-weight:700;letter-spacing:0.06em;margin-bottom:5px;color:${isTop ? '#000' : '#666'};">
+                                ${letters} letters
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:4px;">`;
+                        combos.forEach((combo, i) => {
+                            const prevPlacements = combo.positions.map((pos, pi) => ({
+                                start: pos - 1, length: combo.blocks[pi].text.length,
+                                color: combo.blocks[pi].color, text: combo.blocks[pi].text
+                            }));
+                            const comboIdx = _positionCombos.length;
+                            _positionCombos.push(prevPlacements.map((p, pi) => ({ start: p.start, text: p.text, blockId: combo.blocks[pi].id })));
+                            const chips = combo.blocks.map(b => renderBlockChip(b)).join(' ');
+                            html += `<div onclick="applyPositionCombo(${comboIdx})" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-family:'Banana Grotesk',sans-serif;font-size:0.73rem;cursor:pointer;padding:3px 4px;transition:background 100ms;${i === 0 && isTop ? 'font-weight:700;' : 'color:#555;'}" onmouseover="this.style.background='rgba(0,0,0,0.04)'" onmouseout="this.style.background=''">
+                                ${chips} ${renderPositionPreview(wordLength, prevPlacements)}
+                                <span style="color:#888;font-weight:400;">${combo.count.toLocaleString()} words</span>
+                            </div>`;
+                        });
+                        html += `</div></div>`;
                     });
-                    html += `</div></div>`;
                 }
             }
 
@@ -1301,7 +1403,7 @@
                         const opacity = (0.18 + ratio * 0.82).toFixed(2);
                         const isBest = counts[i] === max;
                         const border = isBest ? '2px solid #000' : '1px solid rgba(0,0,0,0.18)';
-                        html += `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;min-width:30px;">
+                        html += `<div onclick="applyBarPosition('${block.id}', ${i})" style="display:flex;flex-direction:column;align-items:center;gap:2px;min-width:30px;cursor:pointer;" onmouseover="this.style.background='rgba(0,0,0,0.06)'" onmouseout="this.style.background=''">
                             <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.58rem;color:#444;line-height:1;">${counts[i].toLocaleString()}</div>
                             <div style="width:28px;height:${barH}px;background-color:${color};opacity:${opacity};border:${border};flex-shrink:0;"></div>
                             <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.65rem;font-weight:${isBest ? '700' : '400'};line-height:1;">${i + 1}</div>
@@ -1328,7 +1430,7 @@
         document.getElementById('addBlock').addEventListener('click', addBlock);
         document.getElementById('blockInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') addBlock(); });
         document.getElementById('clearAll').addEventListener('click', clearAllBoxes);
-        document.getElementById('clearBlocksAll')?.addEventListener('click', () => { requiredBlocks = []; updateBlocksList(); scheduleUpdateResults(); schedulePositionAnalysis(); });
+        document.getElementById('clearBlocksAll')?.addEventListener('click', () => { saveUndoState(); requiredBlocks = []; updateBlocksList(); scheduleUpdateResults(); schedulePositionAnalysis(); });
         document.getElementById('filterByBlocks')?.addEventListener('change', (e) => { filterByBlocks = !!e.target.checked; scheduleUpdateResults(); });
         document.getElementById('clearSavedAll')?.addEventListener('click', () => { savedWords = []; persistSavedWords(); updateSavedWordsPanel(); scheduleUpdateResults(); });
 
