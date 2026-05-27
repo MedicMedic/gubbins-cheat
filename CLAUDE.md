@@ -1,0 +1,51 @@
+# Gubbins Cheat — Project Notes
+
+## Word Blacklist
+
+These 9-letter words have been intentionally removed and must **not** be re-added to `wordlist.js`.
+
+### Removed this session (2026-05-28)
+
+```
+alcyoneus  ascophore  backframe  beswelter  bisquette  bizardite  blanketer
+brownweed  browpiece  bummerish  calypsist  camleteen  cedreatis  chicquing
+cloudship  conquians  corblimey  dedolency  dembowski  embolemia  englifier
+enspangle  farinosel  flabbella  flunkyite  gemmipara  glenolden  grainsick
+grainsman  harshweed  homefolks  hypoergic  impriment  isophanal  jamesburg
+jointwood  kedushoth  loudspeak  maharawal  maharawat  megalaema  mismingle
+momiology  outchides  outsuitor  overclasp  oxygonial  paddybird  perameles
+persicize  planterly  postaxiad  proofness  pulsellum  quintessa  refixture
+removedly  salleeman  screwship  shellblow  siganidae  siwashing  solenidae
+soupieres  spelaites  spinebone  subbromid  sutherlan  tartishly  tourmente
+tradiment  trilobita  unflatted  unrevenue  unstagily  unstonily
+```
+
+### Removed in earlier commits (git history)
+
+```
+airplaner  aleknagik  alphonist  anammonid  angadreme  anglepods  aromacity
+atticised  aureously  autopoint  backstrip  barleducs  baskonize  belection
+bemajesty  beworship  bezesteen  bicarbide  blooddrop  boyertown  breezeful
+brindlish  brookiest  brookview  buttstrap  camphanyl  cannabins  capeworks
+cephalata  cessantly  chantages  checkline  chiefland  chilotomy  civicisms
+cleopatre  cloverlay  clupeodei  coordinal  corejoice  craspedum  crosspath
+crossweed  cynareous  dainteous  dameworts  decempeda  dedolence  deerstand
+deeryards  demijambe  dendrodic  derbyline  dextorsal  diamylose  dichelyma
+drawpoint  dreamtide  dryfarmer  dudleyite  dummyweed  effoliate  eglanteen
+enddamage  ethylamin  exibilate  favoredly  fevertwig  firstship  flaxwench
+flebotomy  florilage  fluxmeter  foreflank  frithwork  gaugeably  gorsebird
+gwendolin  halachist  halysites  hamlinite  hartungen  hoopmaker  hopestill
+hudsonite  humilific  ickesburg  importray  infrapose  inghilois  intermeet
+islandmen  isobornyl  jarovized  jawfooted  jawlensky  justicies  kankedort
+kneebrush  kunstlied  lippering  liverance  longheads  luxuriety  lyomerous
+mankeeper  metrocele  mitnagged  moonshade  morchella  munichism  nonastral
+operabily  outbanter  outvanish  patchleaf  pectinous  pererrate  plainback
+plenarium  polydermy  postcecal  preacquit  preadhere  preposter  prequoted
+provingly  pyoureter  queintise  ribbandry  royalmast  rubbishry  rytidosis
+sampleman  sawsetter  scrivenly  semitelic  semplices  shamesick  shammashi
+shawanese  sideritis  sklenting  skunkbill  solidillu  solvabled  sporozoal
+stechhelm  stenterer  sweepiest  tacheture  tenstrike  teutophil  thegether
+trolleyer  undereyed  unfacaded  unfrizzly  unprobity  unslicked  unstoutly
+untensely  untersely  unthickly  unwasheds  viperinae  wawarsing  weeksbury
+wellaways  whitfinch
+```
