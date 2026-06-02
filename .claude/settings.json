@@ -1,7 +1,23 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(Get-ChildItem -Path \"c:\\\\Users\\\\maria\\\\gubbins-cheat\" -Recurse -Force | Where-Object {$_.PSIsContainer -eq $false} | Select-Object FullName)"
+      "PowerShell(Get-ChildItem -Path \"c:\\\\Users\\\\maria\\\\gubbins-cheat\" -Recurse -Force | Where-Object {$_.PSIsContainer -eq $false} | Select-Object FullName)",
+      "Bash(node -e ' *)",
+      "WebSearch",
+      "WebFetch(domain:www.wordunscrambler.net)",
+      "WebFetch(domain:www.aarp.org)",
+      "WebFetch(domain:www.merriam-webster.com)",
+      "WebFetch(domain:www.oxfordlearnersdictionaries.com)",
+      "WebFetch(domain:www.dictionary.com)",
+      "WebFetch(domain:www.uscholars.in)",
+      "WebFetch(domain:scrabble.collinsdictionary.com)",
+      "WebFetch(domain:www.cocoscrabble.org)",
+      "WebFetch(domain:tiger2002scrabble.blogspot.com)",
+      "Bash(node _check_new.js)",
+      "WebFetch(domain:slangwise.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:vocabmind.com)",
+      "Bash(node _insert_words.js)"
     ]
   }
 }

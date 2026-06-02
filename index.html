@@ -840,8 +840,7 @@
         function saveUndoState() {
             _undoState = {
                 letterBoxes: letterBoxes.slice(),
-                requiredBlocks: requiredBlocks.map(b => ({...b})),
-                removedWords: new Set(removedWords)
+                requiredBlocks: requiredBlocks.map(b => ({...b}))
             };
             updateUndoButton();
         }
@@ -855,15 +854,12 @@
             if (!_undoState) return;
             letterBoxes = _undoState.letterBoxes;
             requiredBlocks = _undoState.requiredBlocks;
-            removedWords = _undoState.removedWords;
             _undoState = null;
             updateUndoButton();
             updateBoxDisplay();
             updateBoxStyles();
             updateBlocksList();
             updateClearButton();
-            persistRemovedWords();
-            updateHiddenWordsNotice();
             scheduleUpdateResults();
             schedulePositionAnalysis();
         }
@@ -972,7 +968,6 @@
         }
 
         function restoreWord(word) {
-            saveUndoState();
             removedWords.delete(word);
             persistRemovedWords();
             updateHiddenWordsNotice();
@@ -1005,7 +1000,6 @@
                 return;
             }
             // Second click — confirmed, remove
-            saveUndoState();
             pendingRemovals.delete(word);
             removedWords.add(word);
             persistRemovedWords();
@@ -1018,7 +1012,6 @@
         }
 
         function restoreAllRemovedWords() {
-            saveUndoState();
             removedWords = new Set();
             persistRemovedWords();
             const listEl = document.getElementById('hiddenWordsList');
@@ -1029,15 +1022,11 @@
 
         function loadSavedWords() {
             try {
-                const raw = localStorage.getItem(SAVED_WORDS_KEY);
-                if (raw) savedWords = JSON.parse(raw);
-            } catch (_) { savedWords = []; }
+            } catch (_) {}
             updateSavedWordsPanel();
         }
 
-        function persistSavedWords() {
-            try { localStorage.setItem(SAVED_WORDS_KEY, JSON.stringify(savedWords)); } catch (_) {}
-        }
+        function persistSavedWords() {}
 
         function saveCurrentWord(word) {
             const alreadyExists = savedWords.some(s =>
@@ -1251,12 +1240,15 @@
                 });
                 if (validPos.some(p => p.length === 0)) continue;
 
+                const wordSeenKeys = new Set();
                 function bt(idx, uc) {
                     if (idx === blocks.length) {
                         // Normalize: sort (position, text) pairs so same-text blocks at swapped positions deduplicate
                         const pairs = combo.map((pos, i) => [pos, blocks[i].text, i])
                             .sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]));
                         const key = pairs.map(([p, t]) => `${p}:${t}`).join('|');
+                        if (wordSeenKeys.has(key)) return;
+                        wordSeenKeys.add(key);
                         if (!comboCounts.has(key)) {
                             comboCounts.set(key, { count: 0, sortedIndices: pairs.map(([,, i]) => i) });
                         }
