@@ -1425,14 +1425,17 @@
         });
         document.getElementById('addBlock').addEventListener('click', addBlock);
         document.getElementById('blockInput').addEventListener('keydown', (e) => {
-            if (/^[a-zA-Z]$/.test(e.key)) return; // allow letters
-            if (['Backspace','Delete','ArrowLeft','ArrowRight','Home','End','Tab'].includes(e.key)) return; // allow editing keys
+            if (['Backspace','Delete','ArrowLeft','ArrowRight','Home','End','Tab'].includes(e.key)) return;
+            if (/^[a-zA-Z]$/.test(e.key)) return;
+            if (e.key === 'Unidentified') return; // mobile: handled by input event
             e.preventDefault();
-            addBlock(); // any other key (space, comma, enter, symbol…) submits
+            addBlock();
         });
         document.getElementById('blockInput').addEventListener('input', (e) => {
-            const clean = e.target.value.replace(/[^a-zA-Z]/g, '');
-            if (clean !== e.target.value) e.target.value = clean;
+            const raw = e.target.value;
+            const clean = raw.replace(/[^a-zA-Z]/g, '');
+            e.target.value = clean;
+            if (clean !== raw && clean.length > 0) addBlock(); // non-letter typed on mobile → submit
         });
         document.getElementById('clearAll').addEventListener('click', clearAllBoxes);
         document.getElementById('clearBlocksAll')?.addEventListener('click', () => { saveUndoState(); requiredBlocks = []; updateBlocksList(); scheduleUpdateResults(); schedulePositionAnalysis(); });
