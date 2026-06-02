@@ -261548,7 +261548,6 @@ const WORD_LIST = [
   "panathenaea",
   "panathenaean",
   "panathenaic",
-  "panatrope",
   "panatrophic",
   "panatrophy",
   "panautomorphic",

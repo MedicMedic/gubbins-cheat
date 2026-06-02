@@ -17,7 +17,18 @@
       "WebFetch(domain:slangwise.com)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:vocabmind.com)",
-      "Bash(node _insert_words.js)"
+      "Bash(node _insert_words.js)",
+      "WebFetch(domain:folly.studio)",
+      "WebFetch(domain:www.creativeboom.com)",
+      "WebFetch(domain:dogpilegame.com)",
+      "WebFetch(domain:web.archive.org)",
+      "WebFetch(domain:toucharcade.com)",
+      "WebFetch(domain:www.rnz.co.nz)",
+      "WebFetch(domain:x.com)",
+      "WebFetch(domain:webcache.googleusercontent.com)",
+      "WebFetch(domain:gubbins.en.uptodown.com)",
+      "WebFetch(domain:timetravel.mementoweb.org)",
+      "WebFetch(domain:gubbins.soft112.com)"
     ]
   }
 }

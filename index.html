@@ -1314,9 +1314,13 @@
             if (requiredBlocks.length >= 2) {
                 const n = requiredBlocks.length;
                 const allCombos = [];
+                const seenComboSigs = new Set();
                 for (let k = n; k >= 2; k--) {
                     for (const subset of getSubsets(requiredBlocks, k)) {
-                        allCombos.push(...computeJointPlacementsN(subset, candidates, filledPrefix));
+                        for (const combo of computeJointPlacementsN(subset, candidates, filledPrefix)) {
+                            const sig = combo.positions.map((p, i) => `${p}:${combo.blocks[i].text}`).join('|');
+                            if (!seenComboSigs.has(sig)) { seenComboSigs.add(sig); allCombos.push(combo); }
+                        }
                     }
                 }
                 if (allCombos.length > 0) {
@@ -1420,7 +1424,16 @@
             schedulePositionAnalysis();
         });
         document.getElementById('addBlock').addEventListener('click', addBlock);
-        document.getElementById('blockInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') addBlock(); });
+        document.getElementById('blockInput').addEventListener('keydown', (e) => {
+            if (/^[a-zA-Z]$/.test(e.key)) return; // allow letters
+            if (['Backspace','Delete','ArrowLeft','ArrowRight','Home','End','Tab'].includes(e.key)) return; // allow editing keys
+            e.preventDefault();
+            addBlock(); // any other key (space, comma, enter, symbol…) submits
+        });
+        document.getElementById('blockInput').addEventListener('input', (e) => {
+            const clean = e.target.value.replace(/[^a-zA-Z]/g, '');
+            if (clean !== e.target.value) e.target.value = clean;
+        });
         document.getElementById('clearAll').addEventListener('click', clearAllBoxes);
         document.getElementById('clearBlocksAll')?.addEventListener('click', () => { saveUndoState(); requiredBlocks = []; updateBlocksList(); scheduleUpdateResults(); schedulePositionAnalysis(); });
         document.getElementById('filterByBlocks')?.addEventListener('change', (e) => { filterByBlocks = !!e.target.checked; scheduleUpdateResults(); });
