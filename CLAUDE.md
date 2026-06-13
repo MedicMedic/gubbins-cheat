@@ -4,6 +4,25 @@
 
 These 9-letter words have been intentionally removed and must **not** be re-added to `wordlist.js`.
 
+### Removed 2026-06-14
+
+```
+adderfish  alsophila  anamelech  anthraces  antimesia  barnstead  birdsboro
+blindheim  bloodripe  bockstein  bolderian  boodledom  boonsboro  brasquing
+bucerotes  bucuresti  calothrix  centraler  centrales  cockneity  collotypy
+columneas  cursement  daedalist  detraques  doorpiece  dystrophy  emmensite
+emusified  exajoules  fibrocyst  fictation  forjesket  forjeskit  frowsters
+gospelist  hemimerus  henlawson  impollute  kensitite  ketolyses  lemmocyte
+mahalamat  maidhoods  moschidae  moschinae  nicotians  outflunky  outjetted
+outstrive  outstrove  oversadly  pembrokes  penneechs  phacelite  placoidei
+pockmanky  pomatomus  preadvise  predenial  psilocins  quadrator  quantally
+recedence  remigated  repremise  restingly  skylounge  sleepyeye  spanpiece
+sparpiece  squareage  squireage  stageably  sugillate  taxeopoda  taxeopody
+tenthredo  teodorico  thranitic  trashrack  tricrural  tsiltaden  uberously
+unerrancy  unnibbied  unshowily  unspicily  untrouble  urophaein  usquabaes
+usquebaes  watchfree  wellqueme  witchedly  woolwheel
+```
+
 ### Removed this session (2026-05-28)
 
 ```

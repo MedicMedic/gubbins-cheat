@@ -28,7 +28,14 @@
       "WebFetch(domain:webcache.googleusercontent.com)",
       "WebFetch(domain:gubbins.en.uptodown.com)",
       "WebFetch(domain:timetravel.mementoweb.org)",
-      "WebFetch(domain:gubbins.soft112.com)"
+      "WebFetch(domain:gubbins.soft112.com)",
+      "Bash(node --check blockWorker.js)",
+      "Bash(node _add.js)",
+      "Bash(node _rm.js)",
+      "Bash([ -f \"$f\" ])"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\maria\\.claude\\projects\\c--Users-maria-gubbins-cheat\\memory"
     ]
   }
 }
