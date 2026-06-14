@@ -348146,7 +348146,6 @@ const WORD_LIST = [
   "stallar",
   "stallary",
   "stallboard",
-  "stallboat",
   "stalled",
   "stallenger",
   "staller",
