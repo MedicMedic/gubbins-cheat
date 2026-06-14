@@ -47,6 +47,19 @@
             font-style: italic;
         }
         .letter-box.soft:hover { border-color: rgba(0,0,0,0.8) !important; }
+        /* Required ghost: committed to the filter — solid black outline, upright bold-ish text. */
+        .letter-box.soft.soft-required {
+            border-style: solid !important;
+            border-color: #000000 !important;
+            color: rgba(0,0,0,0.85);
+            font-style: normal;
+            font-weight: 700;
+        }
+        /* Off ghost: ignored by ranking + filter — faded out. */
+        .letter-box.soft.soft-off {
+            opacity: 0.4;
+            color: rgba(0,0,0,0.4);
+        }
 
         /* Filled color cycle (in order, then loop) */
         .fill-color-0 { background-color: #e9bba4; }
@@ -144,6 +157,8 @@
         /* Click a placed letter to cycle which letter of that block is borrowed */
         .borrow-cell { cursor: pointer; }
         .borrow-cell:hover { outline: 2px solid rgba(0,0,0,0.55); outline-offset: -2px; }
+        /* Block turned OFF for this word: not used, but still tappable to bring it back. Just a hint underline. */
+        .block-span-off { border: 1px solid transparent !important; border-bottom: 2px dotted rgba(0,0,0,0.4) !important; opacity: 0.7; }
 
         /* Save button on result tiles */
         .save-word-btn {
@@ -330,9 +345,9 @@
                         <span id="hiddenWordsNotice" style="display:none; font-family:'Banana Grotesk',sans-serif; font-size:0.75rem; color:#888;">
                             <button type="button" onclick="toggleHiddenWordsList()" style="background:none;border:none!important;color:#888;cursor:pointer;font-size:0.75rem;padding:0;font-family:'Banana Grotesk',sans-serif;"><span id="hiddenWordsCount">0</span> hidden ▾</button>
                         </span>
-                        <label id="softFilterWrap" class="text-sm text-gray-600 flex items-center gap-2" style="display:none;">
+                        <label id="softFilterWrap" class="text-sm text-gray-600 flex items-center gap-2" style="display:none;" title="Click a ghost letter to cycle it: rank-only → required → off. When any ghost is marked required, this filter matches only those; otherwise it matches all ghosts.">
                             <input type="checkbox" id="softFilterMode" />
-                            <span class="text-sm">Only show words matching the base</span>
+                            <span class="text-sm" id="softFilterLabel">Only show words matching the base</span>
                         </label>
                         <label class="text-sm text-gray-600 flex items-center gap-2">
                             <input type="checkbox" id="filterByBlocks" />
@@ -353,8 +368,10 @@
         const wordBuckets = Object.create(null); // length -> [words]
         let letterBoxes = [];
         let softLetters = [];        // parallel to letterBoxes: 'ghost' letters already on the board (reuse-if-you-can)
+        let softMode = [];           // parallel to softLetters: 0 = rank-only, 1 = required (must match), 2 = off (ignored). Cycled by clicking the ghost box.
         let softFilterMode = false;  // false = soft letters only rank results; true = soft letters filter results
         let placementOverrides = {}; // word -> { blockIndex: {start,length} }: manual "use this letter" choices
+        let _comboLeftovers = null;  // { sig, drops:[{start,letters}] }: leftover tiles from an applied partial combo, dropped when the word is played
         let _overrideSig = null;     // invalidates overrides when the pattern/blocks/length change
         let _lastRenderedResults = [];
         let requiredBlocks = [];
@@ -574,13 +591,18 @@
             for (let i = 0; i < word.length; i++) if (hasFilledInRange(filledPrefix, i, 1)) occupied[i] = true;
 
             // --- 0) Pre-place any forced (user-chosen) placements ---
+            // An override of { off:true } means "don't use this block in this word at all" — it gets
+            // neither a full placement nor an auto-lent letter, so saving won't force it onto the board.
             const placements = [];
             const isForced = new Array(n).fill(false);
+            const offBlock = new Array(n).fill(false);
             if (forced) {
                 for (const key in forced) {
                     const bi = +key;
                     if (bi < 0 || bi >= n) continue;
-                    const { start, length } = forced[key];
+                    const f = forced[key];
+                    if (f && f.off) { isForced[bi] = true; offBlock[bi] = true; continue; }
+                    const { start, length } = f;
                     for (let i = start; i < start + length; i++) if (i >= 0 && i < word.length) occupied[i] = true;
                     placements.push({ blockIndex: bi, start, length, partial: length !== blocks[bi].length, leftover: leftoverOf(bi, start, length) });
                     isForced[bi] = true;
@@ -655,7 +677,7 @@
                     return false;
                 }
                 for (let bi = 0; bi < n; bi++) {
-                    if (!usedBlock[bi] && blocks[bi].length >= 2) tryAssign(bi, new Set());
+                    if (!usedBlock[bi] && !offBlock[bi] && blocks[bi].length >= 2) tryAssign(bi, new Set());
                 }
                 for (const [pos, bi] of posOwner.entries()) {
                     placements.push({ blockIndex: bi, start: pos, length: 1, partial: true, leftover: leftoverOf(bi, pos, 1) });
@@ -699,11 +721,16 @@
                 for (let i = p.start; i < p.start + p.length; i++) occupied[i] = true;
             }
             const cands = candidatePlacementsForBlock(word, blockTexts, blockIndex, occupied);
-            if (cands.length <= 1) return;
-            let curIdx = curPlacement ? cands.findIndex(c => c.start === curPlacement.start && c.length === curPlacement.length) : -1;
-            const next = cands[(curIdx + 1) % cands.length];
+            if (cands.length === 0) return;
+            // Cycle order: each candidate letter/position, then OFF (null) = don't use this block here.
+            const cycle = cands.concat([null]);
+            const curOff = !!(placementOverrides[word] && placementOverrides[word][blockIndex] && placementOverrides[word][blockIndex].off);
+            let curIdx = curOff
+                ? cands.length
+                : (curPlacement ? cands.findIndex(c => c.start === curPlacement.start && c.length === curPlacement.length) : -1);
+            const next = cycle[(curIdx + 1) % cycle.length];
             if (!placementOverrides[word]) placementOverrides[word] = {};
-            placementOverrides[word][blockIndex] = { start: next.start, length: next.length };
+            placementOverrides[word][blockIndex] = next ? { start: next.start, length: next.length } : { off: true };
             renderResultsFromMeta(_lastRenderedResults, { skipSort: true });
         }
 
@@ -806,11 +833,30 @@
                             const col = (requiredBlocks[bi] && requiredBlocks[bi].color) || BLOCK_PALETTE[bi % BLOCK_PALETTE.length];
                             for (let i = p.start; i < p.start + p.length; i++) cellMap[i] = { col, partial: !!p.partial, leftover: p.leftover, bi };
                         }
+                        // A block turned OFF still needs a tap target so it can be brought back. Anchor a
+                        // faint, clickable hint on its first available candidate cell.
+                        const ovW = placementOverrides[w];
+                        if (ovW) {
+                            const occ = Array(w.length).fill(false);
+                            for (let i = 0; i < w.length; i++) if (cellMap[i] || hasFilledInRange(filledPrefixForOv, i, 1)) occ[i] = true;
+                            for (const key in ovW) {
+                                if (!ovW[key] || !ovW[key].off) continue;
+                                const bi = +key;
+                                const cands = candidatePlacementsForBlock(w, blockTextsForOv, bi, occ);
+                                const spot = cands.find(c => cellMap[c.start] === null);
+                                if (!spot) continue;
+                                const col = (requiredBlocks[bi] && requiredBlocks[bi].color) || BLOCK_PALETTE[bi % BLOCK_PALETTE.length];
+                                cellMap[spot.start] = { off: true, col, bi };
+                            }
+                        }
                     let html = '';
                         for (let i = 0; i < w.length; i++) {
                             const cell = cellMap[i];
                             if (cell === null) {
                                 html += `<span>${w[i]}</span>`;
+                            } else if (cell.off) {
+                                const blkTxt = requiredBlocks[cell.bi] ? requiredBlocks[cell.bi].text.toUpperCase() : '';
+                                html += `<span class="block-span block-span-off borrow-cell" title="${blkTxt} not used here — click to use it" onclick="cycleBlockBorrow('${w}', ${cell.bi})">${w[i]}</span>`;
                             } else if (cell.partial) {
                                 const bg = hexToRgba(cell.col, 0.4);
                                 const title = cell.leftover ? `${requiredBlocks[cell.bi] ? requiredBlocks[cell.bi].text.toUpperCase() + ' — ' : ''}leftover ${cell.leftover.toUpperCase()} · click to use a different letter` : 'partial block use';
@@ -846,6 +892,8 @@
             container.innerHTML = '';
             letterBoxes = Array(wordLength).fill('');
             softLetters = Array(wordLength).fill('');
+            softMode = Array(wordLength).fill(0);
+            _comboLeftovers = null;
             setBoxGridColumns();
             for (let i = 0; i < wordLength; i++) {
                 const wrap = document.createElement('div');
@@ -869,8 +917,11 @@
             const candidates = removedWords.size > 0 ? raw.filter(w => !removedWords.has(w)) : raw;
             const blockTexts = requiredBlocks.map(b => b.text);
             const filledPrefix = buildFilledPrefix(letterBoxes);
-            const soft = softLetters.map(s => (s || '').toLowerCase());
+            // Effective soft letters (drop 'off' ghosts) plus the explicitly-required subset.
+            const soft = softLetters.map((s, i) => ((softMode[i] || 0) === 2 ? '' : (s || '').toLowerCase()));
+            const softReq = softLetters.map((s, i) => ((softMode[i] || 0) === 1 && s) ? s.toLowerCase() : '');
             const softTotal = soft.reduce((n, s) => n + (s ? 1 : 0), 0);
+            const softReqTotal = softReq.reduce((n, s) => n + (s ? 1 : 0), 0);
 
             if (candidates.length === 0) {
                 renderResultsFromMeta([]);
@@ -889,6 +940,8 @@
                     filterByBlocks: !!filterByBlocks,
                     soft,
                     softTotal,
+                    softReq,
+                    softReqTotal,
                     softFilter: !!softFilterMode
                 });
                 return; // results will be rendered when worker posts back
@@ -901,7 +954,13 @@
                 if (!matchesPattern(w, letterBoxes)) continue;
                 let softScore = 0;
                 for (let k = 0; k < soft.length; k++) { if (soft[k] && w[k] === soft[k]) softScore++; }
-                if (softFilterMode && softTotal > 0 && softScore !== softTotal) continue;
+                if (softFilterMode) {
+                    if (softReqTotal > 0) {
+                        let ok = true;
+                        for (let k = 0; k < softReq.length; k++) { if (softReq[k] && w[k] !== softReq[k]) { ok = false; break; } }
+                        if (!ok) continue;
+                    } else if (softTotal > 0 && softScore !== softTotal) continue;
+                }
                 const match = blockTexts.length
                     ? matchBlocksForWord(w, blockTexts, filledPrefix)
                     : { placements: [], count: 0, fullCount: 0, totalLength: 0 };
@@ -935,9 +994,9 @@
         }
 
         function handleBoxClick(index) {
-            // Clicking a soft (ghost) box promotes it to a locked/hard letter.
+            // Clicking a soft (ghost) box cycles its filter role: rank-only -> required -> off.
             if (!letterBoxes[index] && softLetters[index]) {
-                promoteSoftToHard(index);
+                cycleSoftMode(index);
                 return;
             }
             activeBox = activeBox === index ? null : index;
@@ -978,6 +1037,8 @@
             saveUndoState();
             letterBoxes = Array(wordLength).fill('');
             softLetters = Array(wordLength).fill('');
+            softMode = Array(wordLength).fill(0);
+            _comboLeftovers = null;
             activeBox = null;
             updateBoxDisplay();
             updateBoxStyles();
@@ -990,11 +1051,23 @@
 
         // ---- Soft / "base" (ghost) letters --------------------------------
 
+        // Cycle a ghost box through its filter role: 0 rank-only -> 1 required -> 2 off -> 0.
+        // Required ghosts must be matched when the base filter is on; off ghosts are ignored entirely.
+        function cycleSoftMode(index) {
+            if (!softLetters[index]) return;
+            softMode[index] = ((softMode[index] || 0) + 1) % 3;
+            updateBoxDisplay();
+            updateSoftControls();
+            scheduleUpdateResults();
+            schedulePositionAnalysis();
+        }
+
         function promoteSoftToHard(index) {
             if (!softLetters[index]) return;
             saveUndoState();
             letterBoxes[index] = softLetters[index];
             softLetters[index] = '';
+            softMode[index] = 0;
             updateBoxDisplay();
             updateClearButton();
             updateSoftControls();
@@ -1006,6 +1079,7 @@
             if (!softLetters[index]) return;
             saveUndoState();
             softLetters[index] = '';
+            softMode[index] = 0;
             updateBoxDisplay();
             updateSoftControls();
             scheduleUpdateResults();
@@ -1016,7 +1090,7 @@
             if (!softLetters.some(s => s)) return;
             saveUndoState();
             for (let i = 0; i < softLetters.length; i++) {
-                if (softLetters[i] && !letterBoxes[i]) { letterBoxes[i] = softLetters[i]; softLetters[i] = ''; }
+                if (softLetters[i] && !letterBoxes[i]) { letterBoxes[i] = softLetters[i]; softLetters[i] = ''; softMode[i] = 0; }
             }
             updateBoxDisplay();
             updateClearButton();
@@ -1029,6 +1103,7 @@
             if (!softLetters.some(s => s)) return;
             saveUndoState();
             softLetters = Array(wordLength).fill('');
+            softMode = Array(wordLength).fill(0);
             updateBoxDisplay();
             updateSoftControls();
             scheduleUpdateResults();
@@ -1039,6 +1114,7 @@
         function buildFromWord(word) {
             saveUndoState();
             softLetters = Array(wordLength).fill('');
+            softMode = Array(wordLength).fill(0);
             for (let i = 0; i < word.length && i < wordLength; i++) {
                 if (!letterBoxes[i]) softLetters[i] = word[i].toUpperCase();
             }
@@ -1057,6 +1133,12 @@
             if (lockBtn) lockBtn.style.display = hasSoft ? 'inline-flex' : 'none';
             if (clearBtn) clearBtn.style.display = hasSoft ? 'inline-flex' : 'none';
             if (wrap) wrap.style.display = hasSoft ? 'flex' : 'none';
+            // Reflect whether the filter is scoped to specific required ghosts or the whole base.
+            const reqCount = softLetters.reduce((n, s, i) => n + (s && (softMode[i] || 0) === 1 ? 1 : 0), 0);
+            const label = document.getElementById('softFilterLabel');
+            if (label) label.textContent = reqCount > 0
+                ? `Only show words matching the ${reqCount} required letter${reqCount === 1 ? '' : 's'}`
+                : 'Only show words matching the base';
             // Mark which result tile is the active base
             const base = hasSoft ? softLetters.map((s, i) => (letterBoxes[i] || s || '').toLowerCase()).join('') : '';
             document.querySelectorAll('.build-from-btn').forEach(btn => {
@@ -1076,9 +1158,10 @@
                     box.className = `letter-box filled fill-color-${colorIndex}`;
                 } else if (soft) {
                     box.textContent = soft;
-                    box.className = 'letter-box soft';
-                    // translucent version of the position's fill color
-                    box.style.backgroundColor = hexToRgba(FILL_COLORS[index % 7], 0.35);
+                    const mode = softMode[index] || 0;
+                    box.className = 'letter-box soft' + (mode === 1 ? ' soft-required' : mode === 2 ? ' soft-off' : '');
+                    // translucent version of the position's fill color (dimmer when the ghost is off)
+                    box.style.backgroundColor = hexToRgba(FILL_COLORS[index % 7], mode === 2 ? 0.12 : 0.35);
                 } else {
                     box.textContent = '';
                     box.className = 'letter-box';
@@ -1116,6 +1199,7 @@
             _undoState = {
                 letterBoxes: letterBoxes.slice(),
                 softLetters: softLetters.slice(),
+                softMode: softMode.slice(),
                 requiredBlocks: requiredBlocks.map(b => ({...b}))
             };
             updateUndoButton();
@@ -1130,6 +1214,8 @@
             if (!_undoState) return;
             letterBoxes = _undoState.letterBoxes;
             softLetters = _undoState.softLetters || Array(wordLength).fill('');
+            softMode = _undoState.softMode || Array(wordLength).fill(0);
+            _comboLeftovers = null;
             requiredBlocks = _undoState.requiredBlocks;
             _undoState = null;
             updateUndoButton();
@@ -1343,20 +1429,28 @@
             const placements = match.placements || [];
             const usedIdx = new Set(placements.map(p => p.blockIndex));
             requiredBlocks = requiredBlocks.filter((b, idx) => !usedIdx.has(idx));
+            // Leftovers recorded when a partial combo was applied are only valid if the board hasn't
+            // changed since (the word being played is still the one that was built).
+            const comboDrops = (_comboLeftovers && _comboLeftovers.sig === letterBoxes.join(',')) ? _comboLeftovers.drops : [];
+            _comboLeftovers = null;
             letterBoxes = Array(wordLength).fill('');
             softLetters = Array(wordLength).fill('');
+            softMode = Array(wordLength).fill(0);
             // Drop each leftover letter in the same column its borrowed letter occupied — that's the
             // crossing point you'll build the next word off. (Spill to the next free box if needed.)
-            for (const p of placements) {
-                if (!p.partial || !p.leftover) continue;
-                let pos = p.start;
-                for (const ch of p.leftover) {
+            const dropLeftover = (start, letters) => {
+                let pos = start;
+                for (const ch of letters) {
                     while (pos < wordLength && letterBoxes[pos] !== '') pos++;
                     if (pos >= wordLength) break;
                     letterBoxes[pos] = ch.toUpperCase();
                     pos++;
                 }
+            };
+            for (const p of placements) {
+                if (p.partial && p.leftover) dropLeftover(p.start, p.leftover);
             }
+            for (const d of comboDrops) dropLeftover(d.start, d.letters);
             activeBox = null;
             updateBlocksList();
             updateBoxDisplay();
@@ -1434,16 +1528,30 @@
             const combo = _positionCombos[idx];
             if (!combo) return;
             saveUndoState();
-            for (const { start, text } of combo) {
+            const drops = [];
+            for (const entry of combo) {
+                const { start, text, partial, blockId } = entry;
                 for (let j = 0; j < text.length; j++) {
                     if (start + j < letterBoxes.length) { letterBoxes[start + j] = text[j].toUpperCase(); softLetters[start + j] = ''; }
                 }
+                // A partial use splits its tile: the borrowed letter lands in the word, the rest is a
+                // leftover that should be left behind once the word is played (saved).
+                if (partial && blockId) {
+                    const blk = requiredBlocks.find(b => b.id === blockId);
+                    if (blk) {
+                        const at = blk.text.indexOf(text.toLowerCase());
+                        const leftover = at >= 0 ? blk.text.slice(0, at) + blk.text.slice(at + 1) : '';
+                        if (leftover) drops.push({ start, letters: leftover });
+                    }
+                }
             }
+            // Both whole and partial uses consume their tile; partial leftovers are dropped on play.
             const usedIds = new Set(combo.map(p => p.blockId).filter(Boolean));
             if (usedIds.size > 0) {
                 requiredBlocks = requiredBlocks.filter(b => !usedIds.has(b.id));
                 updateBlocksList();
             }
+            _comboLeftovers = drops.length ? { sig: letterBoxes.join(','), drops } : null;
             updateBoxDisplay();
             updateClearButton();
             updateSoftControls();
@@ -1483,8 +1591,10 @@
             schedulePositionAnalysis();
         }
 
-        // placements: [{start, length, color, text?}]
-        function renderPositionPreview(wLen, placements) {
+        // placements: [{start, length, color, text?}].
+        // boardRow (optional): { hard:[...], soft:[...] } — letters already on the board, drawn in any
+        // cell a placement doesn't cover (hard = solid, soft/ghost = faded italic).
+        function renderPositionPreview(wLen, placements, boardRow) {
             const colorMap = Array(wLen).fill(null);
             const letterMap = Array(wLen).fill('');
             for (const { start, length, color, text } of placements) {
@@ -1493,12 +1603,30 @@
                     if (text) letterMap[start + i] = text[i] || '';
                 }
             }
+            const hard = (boardRow && boardRow.hard) || [];
+            const soft = (boardRow && boardRow.soft) || [];
             let html = `<span style="display:inline-flex;gap:1px;align-items:center;vertical-align:middle;flex-shrink:0;">`;
             for (let i = 0; i < wLen; i++) {
-                const bg = colorMap[i] ? darkenHex(colorMap[i], 10) : '#d5d0c5';
-                const border = colorMap[i] ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.1)';
-                const letter = letterMap[i] ? letterMap[i].toUpperCase() : '';
-                html += `<span style="width:15px;height:15px;background:${bg};display:inline-flex;align-items:center;justify-content:center;border:1px solid ${border};font-family:'Banana Grotesk',sans-serif;font-size:8px;font-weight:700;line-height:1;">${letter}</span>`;
+                let bg, border, letter, style = '';
+                if (colorMap[i]) {
+                    bg = darkenHex(colorMap[i], 10);
+                    border = 'rgba(0,0,0,0.3)';
+                    letter = letterMap[i] ? letterMap[i].toUpperCase() : '';
+                } else if (hard[i]) {
+                    bg = '#cfcabd';
+                    border = 'rgba(0,0,0,0.3)';
+                    letter = hard[i].toUpperCase();
+                } else if (soft[i]) {
+                    bg = '#e2ddd1';
+                    border = 'rgba(0,0,0,0.18)';
+                    letter = soft[i].toUpperCase();
+                    style = 'font-style:italic;color:rgba(0,0,0,0.5);';
+                } else {
+                    bg = '#d5d0c5';
+                    border = 'rgba(0,0,0,0.1)';
+                    letter = '';
+                }
+                html += `<span style="width:15px;height:15px;background:${bg};display:inline-flex;align-items:center;justify-content:center;border:1px solid ${border};font-family:'Banana Grotesk',sans-serif;font-size:8px;font-weight:700;line-height:1;${style}">${letter}</span>`;
             }
             html += `</span>`;
             return html;
@@ -1561,58 +1689,74 @@
             return result;
         }
 
-        // Find top non-overlapping position combos for ALL blocks in the given array.
-        // Each result: { positions (1-indexed), count, blocks }
+        // Find top non-overlapping position combos for ALL blocks in the given array. Each block may be
+        // placed WHOLE (its full text) or PARTIALLY (a single one of its letters — the rest spills into
+        // an adjacent word), so a combo's letter total can be less than the sum of the block lengths.
+        // Each result: { count, letters, blocks:[...], placements:[{start,length,text,partial}] }.
         function computeJointPlacementsN(blocks, candidates, filledPrefix) {
-            const comboCounts = new Map();
-            const bls = blocks.map(b => b.text.length);
-            const usedS = new Array(blocks.length);
-            const usedE = new Array(blocks.length);
-            const combo = new Array(blocks.length);
+            const comboData = new Map();
+            const n = blocks.length;
+            const chosen = new Array(n);
+            const usedS = new Array(n);
+            const usedE = new Array(n);
 
             for (const word of candidates) {
-                if (blocks.some(b => !word.includes(b.text))) continue; // fast pre-filter
-                const validPos = blocks.map((block, bi) => {
-                    const bl = bls[bi], pos = [];
+                // Per-block placement options: whole sequences + single borrowed letters (multi-letter blocks).
+                const opts = [];
+                let feasible = true;
+                for (let bi = 0; bi < n; bi++) {
+                    const block = blocks[bi].text, bl = block.length, o = [];
                     for (let i = 0; i <= word.length - bl; i++) {
-                        if (!hasFilledInRange(filledPrefix, i, bl) && word.startsWith(block.text, i)) pos.push(i);
+                        if (!hasFilledInRange(filledPrefix, i, bl) && word.startsWith(block, i)) {
+                            o.push({ start: i, length: bl, text: block, partial: false });
+                        }
                     }
-                    return pos;
-                });
-                if (validPos.some(p => p.length === 0)) continue;
+                    if (bl >= 2) {
+                        const letterSet = new Set(block.split(''));
+                        for (let i = 0; i < word.length; i++) {
+                            if (!hasFilledInRange(filledPrefix, i, 1) && letterSet.has(word[i])) {
+                                o.push({ start: i, length: 1, text: word[i], partial: true });
+                            }
+                        }
+                    }
+                    if (o.length === 0) { feasible = false; break; }
+                    opts.push(o);
+                }
+                if (!feasible) continue;
 
                 const wordSeenKeys = new Set();
                 function bt(idx, uc) {
-                    if (idx === blocks.length) {
-                        // Normalize: sort (position, text) pairs so same-text blocks at swapped positions deduplicate
-                        const pairs = combo.map((pos, i) => [pos, blocks[i].text, i])
-                            .sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]));
-                        const key = pairs.map(([p, t]) => `${p}:${t}`).join('|');
+                    if (idx === n) {
+                        // Normalize: sort placements by (start, text) so equivalent board outcomes dedupe.
+                        const pairs = chosen.map((opt, i) => ({ ...opt, bi: i }))
+                            .sort((a, b) => a.start - b.start || (a.text < b.text ? -1 : a.text > b.text ? 1 : 0));
+                        const key = pairs.map(p => `${p.start}:${p.text}`).join('|');
                         if (wordSeenKeys.has(key)) return;
                         wordSeenKeys.add(key);
-                        if (!comboCounts.has(key)) {
-                            comboCounts.set(key, { count: 0, sortedIndices: pairs.map(([,, i]) => i) });
-                        }
-                        comboCounts.get(key).count++;
+                        if (!comboData.has(key)) comboData.set(key, { count: 0, pairs });
+                        comboData.get(key).count++;
                         return;
                     }
-                    const bl = bls[idx];
-                    outer: for (const pos of validPos[idx]) {
-                        const end = pos + bl - 1;
-                        for (let j = 0; j < uc; j++) { if (!(end < usedS[j] || pos > usedE[j])) continue outer; }
-                        usedS[uc] = pos; usedE[uc] = end; combo[idx] = pos;
+                    outer: for (const opt of opts[idx]) {
+                        const s = opt.start, e = opt.start + opt.length - 1;
+                        for (let j = 0; j < uc; j++) { if (!(e < usedS[j] || s > usedE[j])) continue outer; }
+                        usedS[uc] = s; usedE[uc] = e; chosen[idx] = opt;
                         bt(idx + 1, uc + 1);
                     }
                 }
                 bt(0, 0);
             }
-            return [...comboCounts.entries()]
-                .sort((a, b) => b[1].count - a[1].count).slice(0, 5)
-                .map(([k, { count, sortedIndices }]) => ({
-                    positions: k.split('|').map(part => parseInt(part) + 1),
+            return [...comboData.values()]
+                .map(({ count, pairs }) => ({
+                    key: pairs.map(p => `${p.start}:${p.text}`).join('|'),
                     count,
-                    blocks: sortedIndices.map(i => blocks[i])
-                }));
+                    letters: pairs.reduce((s, p) => s + p.length, 0),
+                    partials: pairs.reduce((s, p) => s + (p.partial ? 1 : 0), 0),
+                    blocks: pairs.map(p => blocks[p.bi]),
+                    placements: pairs.map(p => ({ start: p.start, length: p.length, text: p.text, partial: p.partial }))
+                }))
+                .sort((a, b) => b.letters - a.letters || b.count - a.count)
+                .slice(0, 8);
         }
 
         function renderBlockChip(block) {
@@ -1648,6 +1792,16 @@
         }
 
         let posAnalysisExpanded = true;
+        let paExpandedBlocks = new Set(); // block ids whose per-block accordion is expanded
+
+        function togglePABlock(id) {
+            if (paExpandedBlocks.has(id)) paExpandedBlocks.delete(id); else paExpandedBlocks.add(id);
+            const open = paExpandedBlocks.has(id);
+            const body = document.getElementById('pa-body-' + id);
+            if (body) body.style.display = open ? 'block' : 'none';
+            const caret = body && body.previousElementSibling && body.previousElementSibling.querySelector('span');
+            if (caret) caret.style.transform = `rotate(${open ? 90 : 0}deg)`;
+        }
 
         function togglePositionAnalysis() {
             posAnalysisExpanded = !posAnalysisExpanded;
@@ -1674,6 +1828,11 @@
             if (candidates.length === 0) { section.style.display = 'none'; return; }
             const total = candidates.length;
             const filledPrefix = buildFilledPrefix(letterBoxes);
+            // Board context for previews: hard letters + soft ghosts (excluding ones turned off).
+            const boardRow = {
+                hard: letterBoxes.slice(),
+                soft: softLetters.map((s, i) => ((softMode[i] || 0) === 2 ? '' : (s || '')))
+            };
 
             let html = '';
             bestPositionCombo = null;
@@ -1687,28 +1846,27 @@
                 for (let k = n; k >= 2; k--) {
                     for (const subset of getSubsets(requiredBlocks, k)) {
                         for (const combo of computeJointPlacementsN(subset, candidates, filledPrefix)) {
-                            const sig = combo.positions.map((p, i) => `${p}:${combo.blocks[i].text}`).join('|');
-                            if (!seenComboSigs.has(sig)) { seenComboSigs.add(sig); allCombos.push(combo); }
+                            if (!seenComboSigs.has(combo.key)) { seenComboSigs.add(combo.key); allCombos.push(combo); }
                         }
                     }
                 }
                 if (allCombos.length > 0) {
-                    // Group by total letters covered
+                    // Group by total letters covered (partial uses count as 1 each)
                     const groups = new Map();
                     for (const combo of allCombos) {
-                        const letters = combo.blocks.reduce((s, b) => s + b.text.length, 0);
-                        if (!groups.has(letters)) groups.set(letters, []);
-                        groups.get(letters).push(combo);
+                        if (!groups.has(combo.letters)) groups.set(combo.letters, []);
+                        groups.get(combo.letters).push(combo);
                     }
-                    // Sort groups most-letters first; within each group sort by word count
+                    // Sort groups most-letters first; within each group put all-solid (whole-block) combos
+                    // ahead of ones that borrow a partial letter, even if they match fewer words.
                     const sortedGroups = [...groups.entries()].sort((a, b) => b[0] - a[0]);
-                    sortedGroups.forEach(([, combos]) => combos.sort((a, b) => b.count - a.count));
+                    sortedGroups.forEach(([, combos]) => combos.sort((a, b) => a.partials - b.partials || b.count - a.count));
 
                     // Best combo = top of the highest-letter group
                     const topCombo = sortedGroups[0][1][0];
-                    bestPositionCombo = topCombo.positions.map((pos, pi) => ({
+                    bestPositionCombo = topCombo.placements.map((p, pi) => ({
                         blockIndex: requiredBlocks.indexOf(topCombo.blocks[pi]),
-                        start: pos - 1
+                        start: p.start
                     }));
 
                     const topLetters = sortedGroups[0][0];
@@ -1720,15 +1878,18 @@
                             </div>
                             <div style="display:flex;flex-direction:column;gap:4px;">`;
                         combos.forEach((combo, i) => {
-                            const prevPlacements = combo.positions.map((pos, pi) => ({
-                                start: pos - 1, length: combo.blocks[pi].text.length,
-                                color: combo.blocks[pi].color, text: combo.blocks[pi].text
+                            const prevPlacements = combo.placements.map((p, pi) => ({
+                                start: p.start, length: p.length,
+                                color: combo.blocks[pi].color, text: p.text
                             }));
                             const comboIdx = _positionCombos.length;
-                            _positionCombos.push(prevPlacements.map((p, pi) => ({ start: p.start, text: p.text, blockId: combo.blocks[pi].id })));
-                            const chips = combo.blocks.map(b => renderBlockChip(b)).join(' ');
+                            _positionCombos.push(combo.placements.map((p, pi) => ({ start: p.start, text: p.text, blockId: combo.blocks[pi].id, partial: p.partial })));
+                            // Chip per block — partial uses show "X of BLOCK" so it's clear only one letter lands.
+                            const chips = combo.placements.map((p, pi) => p.partial
+                                ? `<span style="background-color:${combo.blocks[pi].color};padding:1px 6px;border:1px dashed rgba(0,0,0,0.5);font-style:italic;font-family:'Banana Grotesk',sans-serif;">${p.text.toUpperCase()}</span><span style="font-weight:400;color:#888;font-size:0.7rem;"> of ${combo.blocks[pi].text.toUpperCase()}</span>`
+                                : renderBlockChip(combo.blocks[pi])).join(' ');
                             html += `<div onclick="applyPositionCombo(${comboIdx})" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-family:'Banana Grotesk',sans-serif;font-size:0.73rem;cursor:pointer;padding:3px 4px;transition:background 100ms;${i === 0 && isTop ? 'font-weight:700;' : 'color:#555;'}" onmouseover="this.style.background='rgba(0,0,0,0.04)'" onmouseout="this.style.background=''">
-                                ${chips} ${renderPositionPreview(wordLength, prevPlacements)}
+                                ${chips} ${renderPositionPreview(wordLength, prevPlacements, boardRow)}
                                 <span style="color:#888;font-weight:400;">${combo.count.toLocaleString()} words</span>
                             </div>`;
                         });
@@ -1737,7 +1898,8 @@
                 }
             }
 
-            // Per-block bar charts — independent, no cross-block requirement.
+            // Per-block bar charts — each block is its own collapsible accordion so the section stays
+            // compact; expand just the block you're working on. Independent, no cross-block requirement.
             for (const block of requiredBlocks) {
                 // Whole-block placement (uses the tile in one piece). A block can't be dropped onto
                 // a box that's already filled, so exclude any start whose span overlaps a filled box.
@@ -1745,9 +1907,10 @@
                 for (let p = 0; p < counts.length; p++) {
                     if (hasFilledInRange(filledPrefix, p, block.text.length)) counts[p] = 0;
                 }
-                html += renderPosBars(renderBlockChip(block), counts, total, block.color, 'applyBarPosition', block.id);
-                // Single-letter placement for each distinct letter — where to put just that letter when
-                // the tile is used partially (e.g. the S of LS).
+                // Whole-tile bars are shown by default (the main, "solid" use of the block).
+                const wholeBars = renderPosBars(renderBlockChip(block), counts, total, block.color, 'applyBarPosition', block.id);
+                // Single-letter (partial) placements — tucked into a collapsed accordion below.
+                let partialBars = '';
                 if (block.text.length >= 2) {
                     const seen = new Set();
                     for (const ch of block.text) {
@@ -1761,9 +1924,26 @@
                             if (letterBoxes[p] && letterBoxes[p] !== '') letterCounts[p] = 0;
                         }
                         const chip = `<span style="background-color:${block.color};padding:1px 6px;border:1px solid rgba(0,0,0,0.25);font-family:'Banana Grotesk',sans-serif;">${ch.toUpperCase()}</span><span style="font-weight:400;color:#888;font-size:0.7rem;"> of ${block.text.toUpperCase()}</span>`;
-                        html += renderPosBars(chip, letterCounts, total, block.color, 'applyLetterAt', ch);
+                        partialBars += renderPosBars(chip, letterCounts, total, block.color, 'applyLetterAt', ch);
                     }
                 }
+                if (!wholeBars && !partialBars) continue; // nothing placeable for this block
+
+                let blockHtml = wholeBars
+                    ? wholeBars
+                    : `<div style="font-family:'Banana Grotesk',sans-serif;font-size:0.78rem;font-weight:700;margin-bottom:6px;">${renderBlockChip(block)} <span style="font-weight:400;color:#888;">&mdash; no whole-tile placement</span></div>`;
+                // Partial single-letter uses live in their own collapsed accordion.
+                if (partialBars) {
+                    const expanded = paExpandedBlocks.has(block.id);
+                    blockHtml += `<div style="margin-top:2px;">
+                        <div onclick="togglePABlock('${block.id}')" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:5px 2px;font-family:'Banana Grotesk',sans-serif;font-size:0.72rem;font-weight:600;color:#666;" onmouseover="this.style.background='rgba(0,0,0,0.03)'" onmouseout="this.style.background=''">
+                            <span style="width:9px;display:inline-block;transition:transform 100ms;transform:rotate(${expanded ? 90 : 0}deg);">▸</span>
+                            partial use &mdash; a single letter of ${renderBlockChip(block)}
+                        </div>
+                        <div id="pa-body-${block.id}" style="display:${expanded ? 'block' : 'none'};padding:4px 2px 2px 6px;">${partialBars}</div>
+                    </div>`;
+                }
+                html += `<div style="border-top:1px solid rgba(0,0,0,0.12);padding-top:6px;margin-top:2px;">${blockHtml}</div>`;
             }
 
             if (!html) { section.style.display = 'none'; return; } // nothing placeable to analyze

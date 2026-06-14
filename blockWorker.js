@@ -114,18 +114,27 @@ function matchBlocksForWord(word, blocks, filledPrefix) {
 }
 
 self.onmessage = function(e) {
-    const { jobId, candidates, letterBoxes, blocks, filterByBlocks, soft, softTotal, softFilter } = e.data;
+    const { jobId, candidates, letterBoxes, blocks, filterByBlocks, soft, softTotal, softReq, softReqTotal, softFilter } = e.data;
     const filledPrefix = buildFilledPrefix(letterBoxes);
     const softArr = soft || [];
     const softCount = softTotal || 0;
+    const softReqArr = softReq || [];
+    const softReqCount = softReqTotal || 0;
     const results = [];
     for (let i = 0; i < candidates.length; i++) {
         const w = candidates[i];
         if (!matchesPattern(w, letterBoxes)) continue;
-        // Soft "base" letters: count matches, optionally filter on a full match.
+        // Soft "base" letters: count matches for ranking; optionally filter. When some ghosts are
+        // marked required, the filter requires only those; otherwise it requires all soft letters.
         let softScore = 0;
         for (let k = 0; k < softArr.length; k++) { if (softArr[k] && w[k] === softArr[k]) softScore++; }
-        if (softFilter && softCount > 0 && softScore !== softCount) continue;
+        if (softFilter) {
+            if (softReqCount > 0) {
+                let ok = true;
+                for (let k = 0; k < softReqArr.length; k++) { if (softReqArr[k] && w[k] !== softReqArr[k]) { ok = false; break; } }
+                if (!ok) continue;
+            } else if (softCount > 0 && softScore !== softCount) continue;
+        }
         const match = blocks.length
             ? matchBlocksForWord(w, blocks, filledPrefix)
             : { placements: [], count: 0, fullCount: 0, totalLength: 0 };
