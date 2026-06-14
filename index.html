@@ -1739,8 +1739,12 @@
 
             // Per-block bar charts — independent, no cross-block requirement.
             for (const block of requiredBlocks) {
-                // Whole-block placement (uses the tile in one piece).
+                // Whole-block placement (uses the tile in one piece). A block can't be dropped onto
+                // a box that's already filled, so exclude any start whose span overlaps a filled box.
                 const counts = analyzeBlockPositionsFiltered(block.text, [], candidates, filledPrefix);
+                for (let p = 0; p < counts.length; p++) {
+                    if (hasFilledInRange(filledPrefix, p, block.text.length)) counts[p] = 0;
+                }
                 html += renderPosBars(renderBlockChip(block), counts, total, block.color, 'applyBarPosition', block.id);
                 // Single-letter placement for each distinct letter — where to put just that letter when
                 // the tile is used partially (e.g. the S of LS).
@@ -1750,6 +1754,12 @@
                         if (seen.has(ch)) continue;
                         seen.add(ch);
                         const letterCounts = analyzeBlockPositionsFiltered(ch, [], candidates, filledPrefix);
+                        // A single borrowed letter can only go into an EMPTY box; an already-filled
+                        // box scores `total` here (every candidate matches the pattern) and would
+                        // otherwise dominate as the "best" position. Exclude filled boxes.
+                        for (let p = 0; p < letterCounts.length; p++) {
+                            if (letterBoxes[p] && letterBoxes[p] !== '') letterCounts[p] = 0;
+                        }
                         const chip = `<span style="background-color:${block.color};padding:1px 6px;border:1px solid rgba(0,0,0,0.25);font-family:'Banana Grotesk',sans-serif;">${ch.toUpperCase()}</span><span style="font-weight:400;color:#888;font-size:0.7rem;"> of ${block.text.toUpperCase()}</span>`;
                         html += renderPosBars(chip, letterCounts, total, block.color, 'applyLetterAt', ch);
                     }
