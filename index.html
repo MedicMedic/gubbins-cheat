@@ -159,6 +159,15 @@
         .borrow-cell:hover { outline: 2px solid rgba(0,0,0,0.55); outline-offset: -2px; }
         /* Block turned OFF for this word: not used, but still tappable to bring it back. Just a hint underline. */
         .block-span-off { border: 1px solid transparent !important; border-bottom: 2px dotted rgba(0,0,0,0.4) !important; opacity: 0.7; }
+        /* Per-letter toggle inside a required block: click a letter to disable it (it won't be used; it
+           becomes leftover left on the board when the word is played). */
+        .block-letter { cursor: pointer; padding: 0 0.06em; border-radius: 4px; transition: background 100ms; }
+        .block-letter:hover { background: rgba(0,0,0,0.14); }
+        .block-letter-off { opacity: 0.32; text-decoration: line-through; text-decoration-thickness: 2px; }
+        /* Disable/enable pill on the Position Analysis partial-use rows */
+        .pa-letter-toggle { cursor: pointer; font-family: 'Banana Grotesk', sans-serif; font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #777; border: 1px solid rgba(0,0,0,0.28); border-radius: 999px; padding: 1px 7px; margin-left: 6px; white-space: nowrap; }
+        .pa-letter-toggle:hover { background: rgba(0,0,0,0.07); color: #333; }
+        .pa-partial-disabled { display: flex; align-items: center; gap: 4px; font-family: 'Banana Grotesk', sans-serif; font-size: 0.73rem; color: #999; margin-bottom: 10px; }
 
         /* Save button on result tiles */
         .save-word-btn {
@@ -345,6 +354,10 @@
                         <span id="hiddenWordsNotice" style="display:none; font-family:'Banana Grotesk',sans-serif; font-size:0.75rem; color:#888;">
                             <button type="button" onclick="toggleHiddenWordsList()" style="background:none;border:none!important;color:#888;cursor:pointer;font-size:0.75rem;padding:0;font-family:'Banana Grotesk',sans-serif;"><span id="hiddenWordsCount">0</span> hidden ▾</button>
                         </span>
+                        <label id="ignoreSoftWrap" class="text-sm text-gray-600 flex items-center gap-2" title="Ignore soft (ghost) letters entirely — no ranking boost and no filtering. The ghosts stay visible so you can flip this back on.">
+                            <input type="checkbox" id="ignoreSoftLetters" />
+                            <span class="text-sm">Ignore soft letters</span>
+                        </label>
                         <label id="softFilterWrap" class="text-sm text-gray-600 flex items-center gap-2" style="display:none;" title="Click a ghost letter to cycle it: rank-only → required → off. When any ghost is marked required, this filter matches only those; otherwise it matches all ghosts.">
                             <input type="checkbox" id="softFilterMode" />
                             <span class="text-sm" id="softFilterLabel">Only show words matching the base</span>
@@ -370,6 +383,7 @@
         let softLetters = [];        // parallel to letterBoxes: 'ghost' letters already on the board (reuse-if-you-can)
         let softMode = [];           // parallel to softLetters: 0 = rank-only, 1 = required (must match), 2 = off (ignored). Cycled by clicking the ghost box.
         let softFilterMode = false;  // false = soft letters only rank results; true = soft letters filter results
+        let ignoreSoft = false;      // true = ignore soft letters entirely (no ranking boost, no filtering)
         let placementOverrides = {}; // word -> { blockIndex: {start,length} }: manual "use this letter" choices
         let _comboLeftovers = null;  // { sig, drops:[{start,letters}] }: leftover tiles from an applied partial combo, dropped when the word is played
         let _overrideSig = null;     // invalidates overrides when the pattern/blocks/length change
@@ -573,10 +587,21 @@
         // A block may be used FULLY (its whole sequence, contiguous) or PARTIALLY (one of its
         // letters, the rest left over). Full uses are chosen first and always preferred; remaining
         // blocks then lend a single letter into still-free positions via bipartite matching.
+        // A per-block letter mask from disabled letters: null = unrestricted; otherwise the whole tile
+        // can't be placed (a disabled letter wouldn't be used) and only `allowed` letters can be borrowed.
+        function buildBlockMask(block) {
+            const dis = block && block.disabled;
+            if (!dis || dis.length === 0) return null;
+            const allowed = [];
+            for (let i = 0; i < block.text.length; i++) if (!dis.includes(i)) allowed.push(block.text[i]);
+            return { wholeAllowed: false, allowed };
+        }
+
         // Returns { placements:[{blockIndex,start,length,partial,leftover?}], count, fullCount, totalLength }.
         // `forced` (optional): { blockIndex: {start,length} } — manual "use this letter here" choices
         // that are pre-placed; the remaining blocks are then optimized around them.
-        function matchBlocksForWord(word, blocks, filledPrefix, forced) {
+        // `masks` (optional): per-block { wholeAllowed, allowed } from disabled letters (or null entries).
+        function matchBlocksForWord(word, blocks, filledPrefix, forced, masks) {
             if (!blocks || blocks.length === 0) return { placements: [], count: 0, fullCount: 0, totalLength: 0 };
             const n = blocks.length;
 
@@ -613,6 +638,7 @@
             const fullPositions = blocks.map((block, bi) => {
                 const starts = [];
                 if (isForced[bi]) return starts;
+                if (masks && masks[bi] && !masks[bi].wholeAllowed) return starts; // disabled letter ⇒ no whole-tile use
                 const bl = block.length;
                 for (let i = 0; i <= word.length - bl; i++) {
                     let ok = true;
@@ -663,7 +689,7 @@
             for (let i = 0; i < word.length; i++) if (!occupied[i]) freePos.push(i);
 
             if (freePos.length) {
-                const blockLetterSet = blocks.map(b => new Set(b.split('')));
+                const blockLetterSet = blocks.map((b, bi) => (masks && masks[bi]) ? new Set(masks[bi].allowed) : new Set(b.split('')));
                 const posOwner = new Map(); // free position -> blockIndex it currently lends to
                 function tryAssign(bi, seen) {
                     for (const pos of freePos) {
@@ -691,16 +717,18 @@
 
         // All candidate placements (full + single-letter) for one block in a word, given which
         // positions are already taken by filled boxes and the OTHER blocks' current placements.
-        function candidatePlacementsForBlock(word, blocks, bi, occupied) {
+        function candidatePlacementsForBlock(word, blocks, bi, occupied, mask) {
             const block = blocks[bi], bl = block.length, cands = [];
-            for (let i = 0; i <= word.length - bl; i++) {        // full
-                let ok = true;
-                for (let j = 0; j < bl; j++) if (occupied[i + j]) { ok = false; break; }
-                if (ok && word.startsWith(block, i)) cands.push({ start: i, length: bl });
+            if (!(mask && !mask.wholeAllowed)) {                  // full (skipped if a letter is disabled)
+                for (let i = 0; i <= word.length - bl; i++) {
+                    let ok = true;
+                    for (let j = 0; j < bl; j++) if (occupied[i + j]) { ok = false; break; }
+                    if (ok && word.startsWith(block, i)) cands.push({ start: i, length: bl });
+                }
             }
             if (bl >= 2) {                                        // single letters
                 for (let i = 0; i < word.length; i++) {
-                    if (!occupied[i] && block.indexOf(word[i]) !== -1) cands.push({ start: i, length: 1 });
+                    if (!occupied[i] && block.indexOf(word[i]) !== -1 && (!mask || mask.allowed.includes(word[i]))) cands.push({ start: i, length: 1 });
                 }
             }
             cands.sort((a, b) => a.start - b.start || b.length - a.length);
@@ -712,7 +740,8 @@
             const blockTexts = requiredBlocks.map(b => b.text);
             if (blockIndex < 0 || blockIndex >= blockTexts.length) return;
             const filledPrefix = buildFilledPrefix(letterBoxes);
-            const cur = matchBlocksForWord(word, blockTexts, filledPrefix, placementOverrides[word] || null);
+            const masks = requiredBlocks.map(buildBlockMask);
+            const cur = matchBlocksForWord(word, blockTexts, filledPrefix, placementOverrides[word] || null, masks);
             const occupied = new Array(word.length).fill(false);
             for (let i = 0; i < word.length; i++) if (hasFilledInRange(filledPrefix, i, 1)) occupied[i] = true;
             let curPlacement = null;
@@ -720,7 +749,7 @@
                 if (p.blockIndex === blockIndex) { curPlacement = p; continue; }
                 for (let i = p.start; i < p.start + p.length; i++) occupied[i] = true;
             }
-            const cands = candidatePlacementsForBlock(word, blockTexts, blockIndex, occupied);
+            const cands = candidatePlacementsForBlock(word, blockTexts, blockIndex, occupied, masks[blockIndex]);
             if (cands.length === 0) return;
             // Cycle order: each candidate letter/position, then OFF (null) = don't use this block here.
             const cycle = cands.concat([null]);
@@ -793,22 +822,25 @@
                     if (bFull !== aFull) return bFull - aFull;
                     const aScore = a.softScore || 0, bScore = b.softScore || 0;
                     if (bScore !== aScore) return bScore - aScore;
+                    // Then the most "filled" words first — the more board cells the blocks cover, the higher.
+                    if (b.match.totalLength !== a.match.totalLength) return b.match.totalLength - a.match.totalLength;
                     const aTop = matchesBestCombo(a.match.placements) ? 1 : 0;
                     const bTop = matchesBestCombo(b.match.placements) ? 1 : 0;
                     if (bTop !== aTop) return bTop - aTop;
-                    if (b.match.count !== a.match.count) return b.match.count - a.match.count;
+                    // For equal coverage, prefer whole tiles over scattered single letters, then more placements.
                     const aBlkFull = a.match.fullCount || 0, bBlkFull = b.match.fullCount || 0;
                     if (bBlkFull !== aBlkFull) return bBlkFull - aBlkFull;
-                    if (b.match.totalLength !== a.match.totalLength) return b.match.totalLength - a.match.totalLength;
+                    if (b.match.count !== a.match.count) return b.match.count - a.match.count;
                     return a.word.localeCompare(b.word);
                 });
             }
 
-            // Invalidate manual borrow choices if the pattern/blocks/length changed.
-            const ovSig = JSON.stringify([wordLength, letterBoxes, requiredBlocks.map(b => b.text)]);
+            // Invalidate manual borrow choices if the pattern/blocks/length/disabled-letters changed.
+            const ovSig = JSON.stringify([wordLength, letterBoxes, requiredBlocks.map(b => b.text + ':' + (b.disabled || []).join(''))]);
             if (ovSig !== _overrideSig) { placementOverrides = {}; _overrideSig = ovSig; }
             _lastRenderedResults = resultsWithMeta;
             const blockTextsForOv = requiredBlocks.map(b => b.text);
+            const blockMasksForOv = requiredBlocks.map(buildBlockMask);
             const filledPrefixForOv = buildFilledPrefix(letterBoxes);
 
             const container = document.getElementById('resultsContainer');
@@ -825,10 +857,13 @@
                     const w = item.word;
                         // Apply any manual borrow choices for this word.
                         const effMatch = placementOverrides[w]
-                            ? matchBlocksForWord(w, blockTextsForOv, filledPrefixForOv, placementOverrides[w])
+                            ? matchBlocksForWord(w, blockTextsForOv, filledPrefixForOv, placementOverrides[w], blockMasksForOv)
                             : item.match;
                         const cellMap = Array(w.length).fill(null);
                         for (const p of effMatch.placements) {
+                            // "Ignore soft letters" = don't mark partial single-letter borrows (the dashed,
+                            // soft-looking letters). The word still shows in the same spot; only the mark goes.
+                            if (ignoreSoft && p.partial) continue;
                             const bi = p.blockIndex;
                             const col = (requiredBlocks[bi] && requiredBlocks[bi].color) || BLOCK_PALETTE[bi % BLOCK_PALETTE.length];
                             for (let i = p.start; i < p.start + p.length; i++) cellMap[i] = { col, partial: !!p.partial, leftover: p.leftover, bi };
@@ -842,7 +877,7 @@
                             for (const key in ovW) {
                                 if (!ovW[key] || !ovW[key].off) continue;
                                 const bi = +key;
-                                const cands = candidatePlacementsForBlock(w, blockTextsForOv, bi, occ);
+                                const cands = candidatePlacementsForBlock(w, blockTextsForOv, bi, occ, blockMasksForOv[bi]);
                                 const spot = cands.find(c => cellMap[c.start] === null);
                                 if (!spot) continue;
                                 const col = (requiredBlocks[bi] && requiredBlocks[bi].color) || BLOCK_PALETTE[bi % BLOCK_PALETTE.length];
@@ -916,12 +951,15 @@
             const raw = wordBuckets[wordLength] || [];
             const candidates = removedWords.size > 0 ? raw.filter(w => !removedWords.has(w)) : raw;
             const blockTexts = requiredBlocks.map(b => b.text);
+            const blockMasks = requiredBlocks.map(buildBlockMask);
             const filledPrefix = buildFilledPrefix(letterBoxes);
-            // Effective soft letters (drop 'off' ghosts) plus the explicitly-required subset.
-            const soft = softLetters.map((s, i) => ((softMode[i] || 0) === 2 ? '' : (s || '').toLowerCase()));
-            const softReq = softLetters.map((s, i) => ((softMode[i] || 0) === 1 && s) ? s.toLowerCase() : '');
+            // Effective soft letters (drop 'off' ghosts) plus the explicitly-required subset. When the
+            // master "ignore soft letters" switch is on, soft letters drop out of ranking and filtering.
+            const soft = ignoreSoft ? [] : softLetters.map((s, i) => ((softMode[i] || 0) === 2 ? '' : (s || '').toLowerCase()));
+            const softReq = ignoreSoft ? [] : softLetters.map((s, i) => ((softMode[i] || 0) === 1 && s) ? s.toLowerCase() : '');
             const softTotal = soft.reduce((n, s) => n + (s ? 1 : 0), 0);
             const softReqTotal = softReq.reduce((n, s) => n + (s ? 1 : 0), 0);
+            const softFilterActive = !!softFilterMode && !ignoreSoft;
 
             if (candidates.length === 0) {
                 renderResultsFromMeta([]);
@@ -937,12 +975,13 @@
                     candidates,
                     letterBoxes: letterBoxes.slice(),
                     blocks: blockTexts,
+                    blockMasks,
                     filterByBlocks: !!filterByBlocks,
                     soft,
                     softTotal,
                     softReq,
                     softReqTotal,
-                    softFilter: !!softFilterMode
+                    softFilter: softFilterActive
                 });
                 return; // results will be rendered when worker posts back
             }
@@ -954,7 +993,7 @@
                 if (!matchesPattern(w, letterBoxes)) continue;
                 let softScore = 0;
                 for (let k = 0; k < soft.length; k++) { if (soft[k] && w[k] === soft[k]) softScore++; }
-                if (softFilterMode) {
+                if (softFilterActive) {
                     if (softReqTotal > 0) {
                         let ok = true;
                         for (let k = 0; k < softReq.length; k++) { if (softReq[k] && w[k] !== softReq[k]) { ok = false; break; } }
@@ -962,7 +1001,7 @@
                     } else if (softTotal > 0 && softScore !== softTotal) continue;
                 }
                 const match = blockTexts.length
-                    ? matchBlocksForWord(w, blockTexts, filledPrefix)
+                    ? matchBlocksForWord(w, blockTexts, filledPrefix, null, blockMasks)
                     : { placements: [], count: 0, fullCount: 0, totalLength: 0 };
                 if (filterByBlocks && match.count === 0) continue;
                 resultsWithMeta.push({ word: w, match, softScore, softFull: softTotal > 0 && softScore === softTotal });
@@ -1130,9 +1169,12 @@
             const lockBtn = document.getElementById('lockBaseBtn');
             const clearBtn = document.getElementById('clearBaseBtn');
             const wrap = document.getElementById('softFilterWrap');
+            const ignoreWrap = document.getElementById('ignoreSoftWrap');
             if (lockBtn) lockBtn.style.display = hasSoft ? 'inline-flex' : 'none';
             if (clearBtn) clearBtn.style.display = hasSoft ? 'inline-flex' : 'none';
-            if (wrap) wrap.style.display = hasSoft ? 'flex' : 'none';
+            if (ignoreWrap) ignoreWrap.style.display = 'flex'; // always available, even before any ghosts exist
+            // The "only show matching the base" filter is moot when soft letters are being ignored.
+            if (wrap) wrap.style.display = (hasSoft && !ignoreSoft) ? 'flex' : 'none';
             // Reflect whether the filter is scoped to specific required ghosts or the whole base.
             const reqCount = softLetters.reduce((n, s, i) => n + (s && (softMode[i] || 0) === 1 ? 1 : 0), 0);
             const label = document.getElementById('softFilterLabel');
@@ -1150,7 +1192,8 @@
             document.querySelectorAll('.letter-box').forEach((box, index) => {
                 const parent = box.parentElement;
                 const letter = letterBoxes[index];
-                const soft = !letter ? softLetters[index] : '';
+                // Ghosts are hidden while soft letters are being ignored (they're retained, just not drawn).
+                const soft = (!letter && !ignoreSoft) ? softLetters[index] : '';
                 box.style.backgroundColor = '';
                 if (letter) {
                     box.textContent = letter;
@@ -1200,7 +1243,7 @@
                 letterBoxes: letterBoxes.slice(),
                 softLetters: softLetters.slice(),
                 softMode: softMode.slice(),
-                requiredBlocks: requiredBlocks.map(b => ({...b}))
+                requiredBlocks: requiredBlocks.map(b => ({...b, disabled: b.disabled ? b.disabled.slice() : undefined}))
             };
             updateUndoButton();
         }
@@ -1264,6 +1307,40 @@
             schedulePositionAnalysis();
         }
 
+        // Toggle whether letter at position `idx` of a block may be used. Disabled letters are excluded
+        // from all matching (no whole-tile use, no single-letter borrow) and become leftover on play.
+        function toggleBlockLetter(id, idx) {
+            const block = requiredBlocks.find(b => b.id === id);
+            if (!block) return;
+            saveUndoState();
+            const dis = block.disabled ? block.disabled.slice() : [];
+            const at = dis.indexOf(idx);
+            if (at >= 0) dis.splice(at, 1); else dis.push(idx);
+            block.disabled = dis;
+            updateBlocksList();
+            scheduleUpdateResults();
+            schedulePositionAnalysis();
+        }
+
+        // Enable/disable every position of letter `ch` in a block at once. Used by the Position Analysis
+        // partial-use rows, which are keyed by letter rather than position.
+        function setBlockLetterDisabled(id, ch, off) {
+            const block = requiredBlocks.find(b => b.id === id);
+            if (!block) return;
+            saveUndoState();
+            const dis = block.disabled ? block.disabled.slice() : [];
+            for (let i = 0; i < block.text.length; i++) {
+                if (block.text[i] !== ch) continue;
+                const at = dis.indexOf(i);
+                if (off && at < 0) dis.push(i);
+                else if (!off && at >= 0) dis.splice(at, 1);
+            }
+            block.disabled = dis;
+            updateBlocksList();
+            scheduleUpdateResults();
+            schedulePositionAnalysis();
+        }
+
         function updateBlocksList() {
             const container = document.getElementById('blocksList');
             container.innerHTML = '';
@@ -1272,7 +1349,17 @@
                 span.className = 'required-block';
                 const color = block.color || BLOCK_PALETTE[Math.floor(Math.random() * BLOCK_PALETTE.length)];
                 span.style.backgroundColor = color;
-                span.innerHTML = `${block.text.toUpperCase()}
+                // Multi-letter blocks show each letter as a toggle: click a letter to disable it. A disabled
+                // letter is never used by the matcher and is left on the board as leftover when a word is played.
+                const dis = block.disabled || [];
+                const lettersHtml = block.text.length >= 2
+                    ? block.text.split('').map((ch, i) => {
+                        const off = dis.includes(i);
+                        const title = off ? 'disabled — click to use this letter' : "click to disable (won't be used; left behind as leftover)";
+                        return `<span class="block-letter${off ? ' block-letter-off' : ''}" onclick="toggleBlockLetter('${block.id}', ${i})" title="${title}">${ch.toUpperCase()}</span>`;
+                      }).join('')
+                    : block.text.toUpperCase();
+                span.innerHTML = `${lettersHtml}
                     <button class="hover:bg-indigo-200 rounded p-0.5" onclick="removeBlock('${block.id}')" aria-label="remove block">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -1394,8 +1481,9 @@
 
         function saveCurrentWord(word) {
             const blockTexts = requiredBlocks.map(b => b.text);
+            const blockMasks = requiredBlocks.map(buildBlockMask);
             const filledPrefix = buildFilledPrefix(letterBoxes);
-            const match = matchBlocksForWord(word, blockTexts, filledPrefix, placementOverrides[word] || null);
+            const match = matchBlocksForWord(word, blockTexts, filledPrefix, placementOverrides[word] || null, blockMasks);
             const entry = { word, wordLength, letterBoxes: letterBoxes.slice(), blocks: requiredBlocks.map(b => ({...b})), placements: match.placements };
 
             // One entry per word: if it's already saved, refresh that entry in place rather than
@@ -1575,13 +1663,27 @@
             schedulePositionAnalysis();
         }
 
-        // Place a single borrowed letter (from a partial block use) at a position. The block stays in
-        // the list — you've only committed that one letter to the board.
-        function applyLetterAt(letter, positionIdx) {
+        // Place a single borrowed letter (from a partial block use) at a position. This is a PARTIAL use:
+        // the borrowed letter lands now, the block is consumed, and the rest of the block is recorded as a
+        // leftover that gets dropped onto the board when the word is played (saved) — mirroring
+        // applyPositionCombo. (Without a blockId we fall back to just placing the letter.)
+        function applyLetterAt(letter, blockId, positionIdx) {
             if (positionIdx < 0 || positionIdx >= letterBoxes.length) return;
             saveUndoState();
+            // Carry over any leftovers already recorded for the current board (e.g. a prior partial pick)
+            // so borrowing letters from several blocks into one word all leave their leftovers behind.
+            const prevDrops = (_comboLeftovers && _comboLeftovers.sig === letterBoxes.join(',')) ? _comboLeftovers.drops.slice() : [];
             letterBoxes[positionIdx] = letter.toUpperCase();
             softLetters[positionIdx] = '';
+            const block = blockId ? requiredBlocks.find(b => b.id === blockId) : null;
+            if (block) {
+                const at = block.text.indexOf(letter.toLowerCase());
+                const leftover = at >= 0 ? block.text.slice(0, at) + block.text.slice(at + 1) : '';
+                requiredBlocks = requiredBlocks.filter(b => b.id !== blockId);
+                updateBlocksList();
+                if (leftover) prevDrops.push({ start: positionIdx, letters: leftover });
+            }
+            _comboLeftovers = prevDrops.length ? { sig: letterBoxes.join(','), drops: prevDrops } : null;
             activeBox = null;
             updateBoxDisplay();
             updateBoxStyles();
@@ -1689,6 +1791,16 @@
             return result;
         }
 
+        // Canonical board signature: the per-CELL fill (position:letter), independent of how blocks are
+        // grouped. So "ND whole at 4" and "N borrowed at 4 + D borrowed at 5" produce the SAME signature —
+        // letting two combos that spell the identical word collapse to one (we keep the fewest-soft one).
+        function placementCellSig(pairs) {
+            const cells = [];
+            for (const p of pairs) for (let i = 0; i < p.length; i++) cells.push([p.start + i, p.text[i]]);
+            cells.sort((a, b) => a[0] - b[0]);
+            return cells.map(c => c[0] + ':' + c[1]).join('|');
+        }
+
         // Find top non-overlapping position combos for ALL blocks in the given array. Each block may be
         // placed WHOLE (its full text) or PARTIALLY (a single one of its letters — the rest spills into
         // an adjacent word), so a combo's letter total can be less than the sum of the block lengths.
@@ -1706,13 +1818,18 @@
                 let feasible = true;
                 for (let bi = 0; bi < n; bi++) {
                     const block = blocks[bi].text, bl = block.length, o = [];
-                    for (let i = 0; i <= word.length - bl; i++) {
-                        if (!hasFilledInRange(filledPrefix, i, bl) && word.startsWith(block, i)) {
-                            o.push({ start: i, length: bl, text: block, partial: false });
+                    const dis = blocks[bi].disabled || [];
+                    // Whole-tile use is unavailable once any letter of the block is disabled.
+                    if (dis.length === 0) {
+                        for (let i = 0; i <= word.length - bl; i++) {
+                            if (!hasFilledInRange(filledPrefix, i, bl) && word.startsWith(block, i)) {
+                                o.push({ start: i, length: bl, text: block, partial: false });
+                            }
                         }
                     }
                     if (bl >= 2) {
-                        const letterSet = new Set(block.split(''));
+                        const letterSet = new Set();
+                        for (let li = 0; li < bl; li++) if (!dis.includes(li)) letterSet.add(block[li]);
                         for (let i = 0; i < word.length; i++) {
                             if (!hasFilledInRange(filledPrefix, i, 1) && letterSet.has(word[i])) {
                                 o.push({ start: i, length: 1, text: word[i], partial: true });
@@ -1724,17 +1841,19 @@
                 }
                 if (!feasible) continue;
 
-                const wordSeenKeys = new Set();
+                // Different block assignments can land on the same board outcome (key) — e.g. a standalone
+                // "I" tile vs. borrowing "I" from "IN" both place an i at the same spot. Keep, per word, the
+                // representative that borrows the FEWEST partial letters, so whole-tile uses win over partials.
+                const wordBest = new Map(); // key -> { pairs, partials }
                 function bt(idx, uc) {
                     if (idx === n) {
                         // Normalize: sort placements by (start, text) so equivalent board outcomes dedupe.
                         const pairs = chosen.map((opt, i) => ({ ...opt, bi: i }))
                             .sort((a, b) => a.start - b.start || (a.text < b.text ? -1 : a.text > b.text ? 1 : 0));
-                        const key = pairs.map(p => `${p.start}:${p.text}`).join('|');
-                        if (wordSeenKeys.has(key)) return;
-                        wordSeenKeys.add(key);
-                        if (!comboData.has(key)) comboData.set(key, { count: 0, pairs });
-                        comboData.get(key).count++;
+                        const key = placementCellSig(pairs);
+                        const partials = pairs.reduce((s, p) => s + (p.partial ? 1 : 0), 0);
+                        const ex = wordBest.get(key);
+                        if (!ex || partials < ex.partials) wordBest.set(key, { pairs: pairs.slice(), partials });
                         return;
                     }
                     outer: for (const opt of opts[idx]) {
@@ -1745,10 +1864,17 @@
                     }
                 }
                 bt(0, 0);
+                // Merge this word's outcomes: one count per word per key; globally keep the fewest-partial pairs.
+                for (const [key, { pairs, partials }] of wordBest) {
+                    let cd = comboData.get(key);
+                    if (!cd) { cd = { count: 0, pairs, partials }; comboData.set(key, cd); }
+                    cd.count++;
+                    if (partials < cd.partials) { cd.pairs = pairs; cd.partials = partials; }
+                }
             }
             return [...comboData.values()]
                 .map(({ count, pairs }) => ({
-                    key: pairs.map(p => `${p.start}:${p.text}`).join('|'),
+                    key: placementCellSig(pairs),
                     count,
                     letters: pairs.reduce((s, p) => s + p.length, 0),
                     partials: pairs.reduce((s, p) => s + (p.partial ? 1 : 0), 0),
@@ -1763,9 +1889,10 @@
             return `<span style="background-color:${block.color};padding:1px 6px;border:1px solid rgba(0,0,0,0.25);font-family:'Banana Grotesk',sans-serif;">${block.text.toUpperCase()}</span>`;
         }
 
-        // One "best position" bar chart. `clickFn`/`clickArg` build the per-bar onclick:
-        // `clickFn(clickArg, i)`. Returns '' (renders nothing) when no position is placeable.
-        function renderPosBars(chipHtml, counts, total, color, clickFn, clickArg) {
+        // One "best position" bar chart. `clickFn`/`clickArg`(/`clickArg2`) build the per-bar onclick:
+        // `clickFn(clickArg[, clickArg2], i)`. Returns '' (renders nothing) when no position is placeable.
+        function renderPosBars(chipHtml, counts, total, color, clickFn, clickArg, clickArg2) {
+            const extraArg = clickArg2 !== undefined ? `'${clickArg2}', ` : '';
             const max = counts.length ? Math.max(...counts) : 0;
             if (max <= 0) return '';
             const bestPos = counts.findIndex(c => c === max) + 1;
@@ -1781,7 +1908,7 @@
                 const opacity = (0.18 + ratio * 0.82).toFixed(2);
                 const isBest = counts[i] === max;
                 const border = isBest ? '2px solid #000' : '1px solid rgba(0,0,0,0.18)';
-                html += `<div onclick="${clickFn}('${clickArg}', ${i})" style="display:flex;flex-direction:column;align-items:center;gap:2px;min-width:30px;cursor:pointer;" onmouseover="this.style.background='rgba(0,0,0,0.06)'" onmouseout="this.style.background=''">
+                html += `<div onclick="${clickFn}('${clickArg}', ${extraArg}${i})" style="display:flex;flex-direction:column;align-items:center;gap:2px;min-width:30px;cursor:pointer;" onmouseover="this.style.background='rgba(0,0,0,0.06)'" onmouseout="this.style.background=''">
                     <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.58rem;color:#444;line-height:1;">${counts[i].toLocaleString()}</div>
                     <div style="width:28px;height:${barH}px;background-color:${color};opacity:${opacity};border:${border};flex-shrink:0;"></div>
                     <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.65rem;font-weight:${isBest ? '700' : '400'};line-height:1;">${i + 1}</div>
@@ -1828,10 +1955,11 @@
             if (candidates.length === 0) { section.style.display = 'none'; return; }
             const total = candidates.length;
             const filledPrefix = buildFilledPrefix(letterBoxes);
-            // Board context for previews: hard letters + soft ghosts (excluding ones turned off).
+            // Board context for previews: hard letters + soft ghosts (excluding ones turned off, and
+            // dropped entirely while soft letters are being ignored).
             const boardRow = {
                 hard: letterBoxes.slice(),
-                soft: softLetters.map((s, i) => ((softMode[i] || 0) === 2 ? '' : (s || '')))
+                soft: ignoreSoft ? [] : softLetters.map((s, i) => ((softMode[i] || 0) === 2 ? '' : (s || '')))
             };
 
             let html = '';
@@ -1841,15 +1969,23 @@
             // Joint section: collect all combos from all subset sizes, group by total letters filled
             if (requiredBlocks.length >= 2) {
                 const n = requiredBlocks.length;
-                const allCombos = [];
-                const seenComboSigs = new Set();
+                // Different subsets can reach the same board outcome (key) — e.g. {IN,I} borrowing i from IN
+                // vs {I,I} using two standalone tiles. Keep the one that borrows the FEWEST partials, so whole
+                // tiles are preferred over breaking up a multi-letter block for a letter you already have loose.
+                const byKey = new Map();
                 for (let k = n; k >= 2; k--) {
                     for (const subset of getSubsets(requiredBlocks, k)) {
                         for (const combo of computeJointPlacementsN(subset, candidates, filledPrefix)) {
-                            if (!seenComboSigs.has(combo.key)) { seenComboSigs.add(combo.key); allCombos.push(combo); }
+                            const ex = byKey.get(combo.key);
+                            if (!ex || combo.partials < ex.partials) byKey.set(combo.key, combo);
                         }
                     }
                 }
+                // When ignoring soft letters, drop any combo that borrows a partial (soft) letter — only
+                // all-hard (whole-block) combos remain.
+                const allCombos = ignoreSoft
+                    ? [...byKey.values()].filter(c => c.partials === 0)
+                    : [...byKey.values()];
                 if (allCombos.length > 0) {
                     // Group by total letters covered (partial uses count as 1 each)
                     const groups = new Map();
@@ -1901,21 +2037,37 @@
             // Per-block bar charts — each block is its own collapsible accordion so the section stays
             // compact; expand just the block you're working on. Independent, no cross-block requirement.
             for (const block of requiredBlocks) {
+                const disabled = block.disabled || [];
                 // Whole-block placement (uses the tile in one piece). A block can't be dropped onto
                 // a box that's already filled, so exclude any start whose span overlaps a filled box.
-                const counts = analyzeBlockPositionsFiltered(block.text, [], candidates, filledPrefix);
+                // A block with a disabled letter can't be used whole, so it shows no whole-tile bars.
+                const counts = disabled.length ? [] : analyzeBlockPositionsFiltered(block.text, [], candidates, filledPrefix);
                 for (let p = 0; p < counts.length; p++) {
                     if (hasFilledInRange(filledPrefix, p, block.text.length)) counts[p] = 0;
                 }
                 // Whole-tile bars are shown by default (the main, "solid" use of the block).
                 const wholeBars = renderPosBars(renderBlockChip(block), counts, total, block.color, 'applyBarPosition', block.id);
-                // Single-letter (partial) placements — tucked into a collapsed accordion below.
+                // Single-letter (partial) placements — tucked into a collapsed accordion below. Every
+                // distinct letter gets a row with a disable/enable pill; disabled letters show no bars
+                // (they're never suggested as a borrow) but stay listed so they can be re-enabled here.
+                // Hidden entirely while soft letters are being ignored (partial borrows are soft).
                 let partialBars = '';
-                if (block.text.length >= 2) {
+                if (block.text.length >= 2 && !ignoreSoft) {
                     const seen = new Set();
-                    for (const ch of block.text) {
+                    for (let li = 0; li < block.text.length; li++) {
+                        const ch = block.text[li];
                         if (seen.has(ch)) continue;
                         seen.add(ch);
+                        // A letter counts as disabled only when every position holding it is disabled.
+                        const positions = [];
+                        for (let k = 0; k < block.text.length; k++) if (block.text[k] === ch) positions.push(k);
+                        const chDisabled = positions.every(k => disabled.includes(k));
+                        const chipBase = `<span style="background-color:${block.color};padding:1px 6px;border:1px solid rgba(0,0,0,0.25);font-family:'Banana Grotesk',sans-serif;${chDisabled ? 'opacity:0.4;text-decoration:line-through;' : ''}">${ch.toUpperCase()}</span><span style="font-weight:400;color:#888;font-size:0.7rem;"> of ${block.text.toUpperCase()}</span>`;
+                        if (chDisabled) {
+                            const enableBtn = `<span class="pa-letter-toggle" onclick="setBlockLetterDisabled('${block.id}','${ch}',false)" title="use this letter again">enable</span>`;
+                            partialBars += `<div class="pa-partial-disabled">${chipBase} &mdash; disabled ${enableBtn}</div>`;
+                            continue;
+                        }
                         const letterCounts = analyzeBlockPositionsFiltered(ch, [], candidates, filledPrefix);
                         // A single borrowed letter can only go into an EMPTY box; an already-filled
                         // box scores `total` here (every candidate matches the pattern) and would
@@ -1923,8 +2075,8 @@
                         for (let p = 0; p < letterCounts.length; p++) {
                             if (letterBoxes[p] && letterBoxes[p] !== '') letterCounts[p] = 0;
                         }
-                        const chip = `<span style="background-color:${block.color};padding:1px 6px;border:1px solid rgba(0,0,0,0.25);font-family:'Banana Grotesk',sans-serif;">${ch.toUpperCase()}</span><span style="font-weight:400;color:#888;font-size:0.7rem;"> of ${block.text.toUpperCase()}</span>`;
-                        partialBars += renderPosBars(chip, letterCounts, total, block.color, 'applyLetterAt', ch);
+                        const disableBtn = `<span class="pa-letter-toggle" onclick="event.stopPropagation();setBlockLetterDisabled('${block.id}','${ch}',true)" title="don't use this letter — it'll be left behind as leftover">disable</span>`;
+                        partialBars += renderPosBars(chipBase + disableBtn, letterCounts, total, block.color, 'applyLetterAt', ch, block.id);
                     }
                 }
                 if (!wholeBars && !partialBars) continue; // nothing placeable for this block
@@ -1979,6 +2131,7 @@
         document.getElementById('clearBlocksAll')?.addEventListener('click', () => { saveUndoState(); requiredBlocks = []; updateBlocksList(); scheduleUpdateResults(); schedulePositionAnalysis(); });
         document.getElementById('filterByBlocks')?.addEventListener('change', (e) => { filterByBlocks = !!e.target.checked; scheduleUpdateResults(); });
         document.getElementById('softFilterMode')?.addEventListener('change', (e) => { softFilterMode = !!e.target.checked; scheduleUpdateResults(); });
+        document.getElementById('ignoreSoftLetters')?.addEventListener('change', (e) => { ignoreSoft = !!e.target.checked; updateBoxDisplay(); updateSoftControls(); scheduleUpdateResults(); schedulePositionAnalysis(); });
         document.getElementById('clearSavedAll')?.addEventListener('click', () => { savedWords = []; persistSavedWords(); updateSavedWordsPanel(); scheduleUpdateResults(); });
 
         function moveActiveTo(index) {

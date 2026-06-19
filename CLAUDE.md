@@ -4,6 +4,20 @@
 
 These 9-letter words have been intentionally removed and must **not** be re-added to `wordlist.js`.
 
+### Removed 2026-06-19
+
+```
+alkhimovo  aquagreen  asterioid  avicebron  beastbane  bemitered  bephilter
+besotment  blebbings  borderism  bowdichia  breakover  bunodonta  canvasado
+carewares  coldblood  coronetty  crowdweed  daytalers  demipagan  demiveges
+dressline  effierces  enfierces  enraunges  estantion  fanneling  flenchers
+gasperoni  hematoses  ingeniary  intercale  japhetide  kaliphate  mancipium
+marrietta  masscults  ottoville  ottsville  overliing  peggymast  preesteem
+priesteen  redistend  rostrular  schvartze  schwartze  sherlocke  spokester
+steelbows  subradial  superdebt  tetrapoda  trevallys  trictracs  unpermits
+walkerite  wildhorse
+```
+
 ### Removed 2026-06-14
 
 ```

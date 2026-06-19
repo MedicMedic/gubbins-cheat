@@ -27,13 +27,15 @@ function hasFilledInRange(prefix, start, length) {
 // the rest left over). Full uses are chosen first and preferred; remaining blocks then lend a
 // single letter into still-free positions via bipartite matching.
 // Returns { placements:[{blockIndex,start,length,partial,leftover?}], count, fullCount, totalLength }.
-function matchBlocksForWord(word, blocks, filledPrefix) {
+function matchBlocksForWord(word, blocks, filledPrefix, masks) {
     if (!blocks || blocks.length === 0) return { placements: [], count: 0, fullCount: 0, totalLength: 0 };
     const n = blocks.length;
 
     // 1) Best set of non-overlapping FULL placements (maximize count, then letters).
-    const fullPositions = blocks.map(block => {
+    // A block with a disabled letter (mask.wholeAllowed === false) can't be used whole.
+    const fullPositions = blocks.map((block, bi) => {
         const starts = [];
+        if (masks && masks[bi] && !masks[bi].wholeAllowed) return starts;
         const bl = block.length;
         for (let i = 0; i <= word.length - bl; i++) {
             if (word.startsWith(block, i) && !hasFilledInRange(filledPrefix, i, bl)) starts.push(i);
@@ -84,7 +86,7 @@ function matchBlocksForWord(word, blocks, filledPrefix) {
     for (let i = 0; i < word.length; i++) if (!occupied[i]) freePos.push(i);
 
     if (freePos.length) {
-        const blockLetterSet = blocks.map(b => new Set(b.split('')));
+        const blockLetterSet = blocks.map((b, bi) => (masks && masks[bi]) ? new Set(masks[bi].allowed) : new Set(b.split('')));
         const posOwner = new Map();
         function tryAssign(bi, seen) {
             for (const pos of freePos) {
@@ -114,7 +116,7 @@ function matchBlocksForWord(word, blocks, filledPrefix) {
 }
 
 self.onmessage = function(e) {
-    const { jobId, candidates, letterBoxes, blocks, filterByBlocks, soft, softTotal, softReq, softReqTotal, softFilter } = e.data;
+    const { jobId, candidates, letterBoxes, blocks, blockMasks, filterByBlocks, soft, softTotal, softReq, softReqTotal, softFilter } = e.data;
     const filledPrefix = buildFilledPrefix(letterBoxes);
     const softArr = soft || [];
     const softCount = softTotal || 0;
@@ -136,7 +138,7 @@ self.onmessage = function(e) {
             } else if (softCount > 0 && softScore !== softCount) continue;
         }
         const match = blocks.length
-            ? matchBlocksForWord(w, blocks, filledPrefix)
+            ? matchBlocksForWord(w, blocks, filledPrefix, blockMasks)
             : { placements: [], count: 0, fullCount: 0, totalLength: 0 };
         if (filterByBlocks && match.count === 0) continue;
         results.push({ word: w, match, softScore, softFull: softCount > 0 && softScore === softCount });
