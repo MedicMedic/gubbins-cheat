@@ -1,5 +1,31 @@
 # Gubbins Cheat — Project Notes
 
+## Wordlist source of truth (official game dictionary)
+
+As of 2026-07-02, `wordlist.js` is generated directly from the game's own dictionary
+(474,370 words, lengths 2–9 — the game does not validate longer words, so the length
+selector only offers 2–9). This is the authoritative list of what the game accepts, so
+it supersedes manual curation. The blacklist below is retained as history; nearly all of
+it (514/516) is absent from the official list, confirming those removals were correct.
+
+### How to refresh it
+
+The dictionary is a remote Unity Cloud Content Delivery (CCD) AssetBundle, downloaded by
+the app on launch. To pull and regenerate:
+
+1. Pull the app's Addressables config to get the CCD environment/bucket/badge:
+   `com.StudioFolly.GUBBINS` → `assets/aa/settings.json` (`m_CcdManagedData`) and
+   `assets/aa/catalog.json` (bundle path `dictionaries_assets_wordmanager.bundle`).
+2. Fetch the bundle (follow the 307 redirect; `curl -L` mishandles the `%25` in the
+   Location, so use Python `urllib`):
+   `https://d5f581d4-4dc5-458a-980a-1287c5a7f453.client-api.unity3dusercontent.com/client_api/v1/environments/dev/buckets/48d9bd7d-2c77-4798-b58c-922156393430/release_by_badge/latest/entry_by_path/content/?path=/dictionaries_assets_wordmanager.bundle`
+3. Parse with UnityPy: the `Word ManagerAddressable` MonoBehaviour's `WordCache` holds
+   `Length2`…`Length9` string arrays. Lowercase, dedupe, sort by (length, word), emit as
+   `const WORD_LIST = [ ... ];`.
+
+(env=`dev`, bucket=`48d9bd7d-2c77-4798-b58c-922156393430`, badge=`latest` may change with
+game updates — re-read `settings.json` from a freshly pulled APK if the fetch 404s.)
+
 ## Word Blacklist
 
 These 9-letter words have been intentionally removed and must **not** be re-added to `wordlist.js`.
@@ -24,7 +50,7 @@ walkerite  wildhorse
 adderfish  alsophila  anamelech  anthraces  antimesia  barnstead  birdsboro
 blindheim  bloodripe  bockstein  bolderian  boodledom  boonsboro  brasquing
 bucerotes  bucuresti  calothrix  centraler  centrales  cockneity  collotypy
-columneas  cursement  daedalist  detraques  doorpiece  dystrophy  emmensite
+columneas  cursement  daedalist  detraques  doorpiece  emmensite
 emusified  exajoules  fibrocyst  fictation  forjesket  forjeskit  frowsters
 gospelist  hemimerus  henlawson  impollute  kensitite  ketolyses  lemmocyte
 mahalamat  maidhoods  moschidae  moschinae  nicotians  outflunky  outjetted
@@ -72,7 +98,7 @@ predetain  predriven  predriver  preequity  preholder  presuffer  pulpstone
 rabbinics  railwayed  riverwash  scotchery  semipedal  shawville  sheetling
 slinkweed  sloomiest  squabbest  stradella  strontias  subplexal  subpoenal
 sympathic  tetralite  ticklaces  tictacked  tremoloso  triosteum  unfeastly
-verandaed  viritrate  wevertown  widewhere
+viritrate  wevertown  widewhere
 ```
 
 ### Removed in earlier commits (git history)

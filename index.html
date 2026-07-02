@@ -283,12 +283,6 @@
                     <option value="7">7 Letters</option>
                     <option value="8">8 Letters</option>
                     <option value="9" selected>9 Letters</option>
-                    <option value="10">10 Letters</option>
-                    <option value="11">11 Letters</option>
-                    <option value="12">12 Letters</option>
-                    <option value="13">13 Letters</option>
-                    <option value="14">14 Letters</option>
-                    <option value="15">15 Letters</option>
                 </select>
             </div>
 
@@ -385,7 +379,7 @@
         let softFilterMode = false;  // false = soft letters only rank results; true = soft letters filter results
         let ignoreSoft = false;      // true = ignore soft letters entirely (no ranking boost, no filtering)
         let placementOverrides = {}; // word -> { blockIndex: {start,length} }: manual "use this letter" choices
-        let _comboLeftovers = null;  // { sig, drops:[{start,letters}] }: leftover tiles from an applied partial combo, dropped when the word is played
+        let _comboLeftovers = null;  // { cells:[[pos,'CH']], drops:[{start,letters}] }: leftover tiles from an applied partial combo, dropped when the word is played (valid while its placed cells are intact)
         let _overrideSig = null;     // invalidates overrides when the pattern/blocks/length change
         let _lastRenderedResults = [];
         let requiredBlocks = [];
@@ -1243,7 +1237,8 @@
                 letterBoxes: letterBoxes.slice(),
                 softLetters: softLetters.slice(),
                 softMode: softMode.slice(),
-                requiredBlocks: requiredBlocks.map(b => ({...b, disabled: b.disabled ? b.disabled.slice() : undefined}))
+                requiredBlocks: requiredBlocks.map(b => ({...b, disabled: b.disabled ? b.disabled.slice() : undefined})),
+                comboLeftovers: _comboLeftovers ? { cells: _comboLeftovers.cells.map(c => c.slice()), drops: _comboLeftovers.drops.map(d => ({...d})) } : null
             };
             updateUndoButton();
         }
@@ -1258,7 +1253,7 @@
             letterBoxes = _undoState.letterBoxes;
             softLetters = _undoState.softLetters || Array(wordLength).fill('');
             softMode = _undoState.softMode || Array(wordLength).fill(0);
-            _comboLeftovers = null;
+            _comboLeftovers = _undoState.comboLeftovers || null;
             requiredBlocks = _undoState.requiredBlocks;
             _undoState = null;
             updateUndoButton();
@@ -1473,17 +1468,27 @@
 
         function loadSavedWords() {
             try {
-            } catch (_) {}
+                const raw = localStorage.getItem(SAVED_WORDS_KEY);
+                if (raw) savedWords = JSON.parse(raw);
+            } catch (_) { savedWords = []; }
             updateSavedWordsPanel();
         }
 
-        function persistSavedWords() {}
+        function persistSavedWords() {
+            try { localStorage.setItem(SAVED_WORDS_KEY, JSON.stringify(savedWords)); } catch (_) {}
+        }
 
         function saveCurrentWord(word) {
             const blockTexts = requiredBlocks.map(b => b.text);
             const blockMasks = requiredBlocks.map(buildBlockMask);
             const filledPrefix = buildFilledPrefix(letterBoxes);
-            const match = matchBlocksForWord(word, blockTexts, filledPrefix, placementOverrides[word] || null, blockMasks);
+            let match = matchBlocksForWord(word, blockTexts, filledPrefix, placementOverrides[word] || null, blockMasks);
+            // "Ignore soft letters" applies to playing too: partial single-letter borrows are the
+            // soft letters, so drop them — their blocks stay on the board and leave no leftovers.
+            if (ignoreSoft && match.placements.some(p => p.partial)) {
+                const placements = match.placements.filter(p => !p.partial);
+                match = { placements, count: placements.length, fullCount: match.fullCount, totalLength: placements.reduce((s, p) => s + p.length, 0) };
+            }
             const entry = { word, wordLength, letterBoxes: letterBoxes.slice(), blocks: requiredBlocks.map(b => ({...b})), placements: match.placements };
 
             // One entry per word: if it's already saved, refresh that entry in place rather than
@@ -1494,7 +1499,7 @@
                 const unchanged = JSON.stringify(prev.placements) === JSON.stringify(entry.placements) &&
                     JSON.stringify(prev.letterBoxes) === JSON.stringify(entry.letterBoxes) &&
                     JSON.stringify(prev.blocks.map(b => b.text)) === JSON.stringify(blockTexts);
-                if (unchanged) return; // already saved exactly this — nothing to do
+                if (unchanged) { playWordTiles(match); return; } // already saved — still play the tiles
                 entry.id = prev.id;
                 savedWords[idx] = entry;
             } else {
@@ -1517,9 +1522,10 @@
             const placements = match.placements || [];
             const usedIdx = new Set(placements.map(p => p.blockIndex));
             requiredBlocks = requiredBlocks.filter((b, idx) => !usedIdx.has(idx));
-            // Leftovers recorded when a partial combo was applied are only valid if the board hasn't
-            // changed since (the word being played is still the one that was built).
-            const comboDrops = (_comboLeftovers && _comboLeftovers.sig === letterBoxes.join(',')) ? _comboLeftovers.drops : [];
+            // Leftovers recorded when a partial combo was applied stay valid as long as the letters
+            // the combo placed are still on the board — typing MORE letters to narrow the search
+            // must not throw them away.
+            const comboDrops = comboLeftoversValid() ? _comboLeftovers.drops : [];
             _comboLeftovers = null;
             letterBoxes = Array(wordLength).fill('');
             softLetters = Array(wordLength).fill('');
@@ -1612,15 +1618,22 @@
 
         let _positionCombos = [];
 
+        // Leftovers survive extra typing: they're only invalid once one of the cells their combo
+        // placed has been cleared or overwritten.
+        function comboLeftoversValid() {
+            return !!_comboLeftovers && _comboLeftovers.cells.every(c => letterBoxes[c[0]] === c[1]);
+        }
+
         function applyPositionCombo(idx) {
             const combo = _positionCombos[idx];
             if (!combo) return;
             saveUndoState();
             const drops = [];
+            const cells = [];
             for (const entry of combo) {
                 const { start, text, partial, blockId } = entry;
                 for (let j = 0; j < text.length; j++) {
-                    if (start + j < letterBoxes.length) { letterBoxes[start + j] = text[j].toUpperCase(); softLetters[start + j] = ''; }
+                    if (start + j < letterBoxes.length) { letterBoxes[start + j] = text[j].toUpperCase(); softLetters[start + j] = ''; cells.push([start + j, text[j].toUpperCase()]); }
                 }
                 // A partial use splits its tile: the borrowed letter lands in the word, the rest is a
                 // leftover that should be left behind once the word is played (saved).
@@ -1639,7 +1652,7 @@
                 requiredBlocks = requiredBlocks.filter(b => !usedIds.has(b.id));
                 updateBlocksList();
             }
-            _comboLeftovers = drops.length ? { sig: letterBoxes.join(','), drops } : null;
+            _comboLeftovers = drops.length ? { cells, drops } : null;
             updateBoxDisplay();
             updateClearButton();
             updateSoftControls();
@@ -1670,11 +1683,14 @@
         function applyLetterAt(letter, blockId, positionIdx) {
             if (positionIdx < 0 || positionIdx >= letterBoxes.length) return;
             saveUndoState();
-            // Carry over any leftovers already recorded for the current board (e.g. a prior partial pick)
+            // Carry over any leftovers still valid on the current board (e.g. a prior partial pick)
             // so borrowing letters from several blocks into one word all leave their leftovers behind.
-            const prevDrops = (_comboLeftovers && _comboLeftovers.sig === letterBoxes.join(',')) ? _comboLeftovers.drops.slice() : [];
+            const prevValid = comboLeftoversValid();
+            const prevDrops = prevValid ? _comboLeftovers.drops.slice() : [];
+            const cells = prevValid ? _comboLeftovers.cells.slice() : [];
             letterBoxes[positionIdx] = letter.toUpperCase();
             softLetters[positionIdx] = '';
+            cells.push([positionIdx, letter.toUpperCase()]);
             const block = blockId ? requiredBlocks.find(b => b.id === blockId) : null;
             if (block) {
                 const at = block.text.indexOf(letter.toLowerCase());
@@ -1683,7 +1699,7 @@
                 updateBlocksList();
                 if (leftover) prevDrops.push({ start: positionIdx, letters: leftover });
             }
-            _comboLeftovers = prevDrops.length ? { sig: letterBoxes.join(','), drops: prevDrops } : null;
+            _comboLeftovers = prevDrops.length ? { cells, drops: prevDrops } : null;
             activeBox = null;
             updateBoxDisplay();
             updateBoxStyles();
