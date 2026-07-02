@@ -380,6 +380,7 @@
         let ignoreSoft = false;      // true = ignore soft letters entirely (no ranking boost, no filtering)
         let placementOverrides = {}; // word -> { blockIndex: {start,length} }: manual "use this letter" choices
         let _comboLeftovers = null;  // { cells:[[pos,'CH']], drops:[{start,letters}] }: leftover tiles from an applied partial combo, dropped when the word is played (valid while its placed cells are intact)
+        let _pendingLeftovers = [];  // [{start,letter}]: leftover tiles from played words. Each is its own tile on the board and seeds its OWN next word — one letter per row, dealt out one per play.
         let _overrideSig = null;     // invalidates overrides when the pattern/blocks/length change
         let _lastRenderedResults = [];
         let requiredBlocks = [];
@@ -1033,7 +1034,9 @@
 
         function handleBoxClick(index) {
             // Clicking a soft (ghost) box cycles its filter role: rank-only -> required -> off.
-            if (!letterBoxes[index] && softLetters[index]) {
+            // While soft letters are ignored the ghost is hidden, so the click must activate the
+            // box for typing like any empty box (not silently cycle an invisible mode).
+            if (!letterBoxes[index] && softLetters[index] && !ignoreSoft) {
                 cycleSoftMode(index);
                 return;
             }
@@ -1239,11 +1242,13 @@
 
         function saveUndoState() {
             _undoState = {
+                wordLength,
                 letterBoxes: letterBoxes.slice(),
                 softLetters: softLetters.slice(),
                 softMode: softMode.slice(),
                 requiredBlocks: requiredBlocks.map(b => ({...b, disabled: b.disabled ? b.disabled.slice() : undefined})),
-                comboLeftovers: _comboLeftovers ? { cells: _comboLeftovers.cells.map(c => c.slice()), drops: _comboLeftovers.drops.map(d => ({...d})) } : null
+                comboLeftovers: _comboLeftovers ? { cells: _comboLeftovers.cells.map(c => c.slice()), drops: _comboLeftovers.drops.map(d => ({...d})) } : null,
+                pendingLeftovers: _pendingLeftovers.map(d => ({...d}))
             };
             updateUndoButton();
         }
@@ -1255,12 +1260,22 @@
 
         function undo() {
             if (!_undoState) return;
-            letterBoxes = _undoState.letterBoxes;
-            softLetters = _undoState.softLetters || Array(wordLength).fill('');
-            softMode = _undoState.softMode || Array(wordLength).fill(0);
-            _comboLeftovers = _undoState.comboLeftovers || null;
-            requiredBlocks = _undoState.requiredBlocks;
+            const st = _undoState;
             _undoState = null;
+            // Restore across a word-length change: rebuild the DOM row to the saved length first, or
+            // the restored arrays would be misaligned with the boxes on screen.
+            if (st.wordLength && st.wordLength !== wordLength) {
+                wordLength = st.wordLength;
+                const sel = document.getElementById('wordLength');
+                if (sel) sel.value = wordLength;
+                initializeBoxes();
+            }
+            letterBoxes = st.letterBoxes;
+            softLetters = st.softLetters || Array(wordLength).fill('');
+            softMode = st.softMode || Array(wordLength).fill(0);
+            _comboLeftovers = st.comboLeftovers || null;
+            _pendingLeftovers = st.pendingLeftovers || [];
+            requiredBlocks = st.requiredBlocks;
             updateUndoButton();
             updateBoxDisplay();
             updateBoxStyles();
@@ -1532,24 +1547,20 @@
             // must not throw them away.
             const comboDrops = comboLeftoversValid() ? _comboLeftovers.drops : [];
             _comboLeftovers = null;
+            // Every leftover letter is its own tile on the board and seeds its OWN next word — one
+            // leftover letter per row (splitting a 3-letter block means TWO new words). Queue them
+            // all; one is dealt out per play.
+            for (const p of placements) {
+                if (p.partial && p.leftover) for (const ch of p.leftover) _pendingLeftovers.push({ start: p.start, letter: ch });
+            }
+            for (const d of comboDrops) for (const ch of d.letters) _pendingLeftovers.push({ start: d.start, letter: ch });
             letterBoxes = Array(wordLength).fill('');
             softLetters = Array(wordLength).fill('');
             softMode = Array(wordLength).fill(0);
-            // Drop each leftover letter in the same column its borrowed letter occupied — that's the
-            // crossing point you'll build the next word off. (Spill to the next free box if needed.)
-            const dropLeftover = (start, letters) => {
-                let pos = start;
-                for (const ch of letters) {
-                    while (pos < wordLength && letterBoxes[pos] !== '') pos++;
-                    if (pos >= wordLength) break;
-                    letterBoxes[pos] = ch.toUpperCase();
-                    pos++;
-                }
-            };
-            for (const p of placements) {
-                if (p.partial && p.leftover) dropLeftover(p.start, p.leftover);
-            }
-            for (const d of comboDrops) dropLeftover(d.start, d.letters);
+            // Seed the next word with the oldest pending leftover, in the column its borrowed letter
+            // occupied — that's the crossing point you'll build the next word off.
+            const nextLeftover = _pendingLeftovers.shift();
+            if (nextLeftover) letterBoxes[Math.min(nextLeftover.start, wordLength - 1)] = nextLeftover.letter.toUpperCase();
             activeBox = null;
             updateBlocksList();
             updateBoxDisplay();
@@ -1633,8 +1644,11 @@
             const combo = _positionCombos[idx];
             if (!combo) return;
             saveUndoState();
-            const drops = [];
-            const cells = [];
+            // Carry over any leftovers still valid on the current board (e.g. a prior partial pick via
+            // applyLetterAt or an earlier combo) so applying this combo doesn't silently discard them.
+            const prevValid = comboLeftoversValid();
+            const drops = prevValid ? _comboLeftovers.drops.slice() : [];
+            const cells = prevValid ? _comboLeftovers.cells.slice() : [];
             for (const entry of combo) {
                 const { start, text, partial, blockId } = entry;
                 for (let j = 0; j < text.length; j++) {
@@ -1668,9 +1682,12 @@
         function applyBarPosition(blockId, positionIdx) {
             const block = requiredBlocks.find(b => b.id === blockId);
             if (!block) return;
+            // The whole span must fit on the board and be free of hard letters — never overwrite.
+            if (positionIdx < 0 || positionIdx + block.text.length > letterBoxes.length) return;
+            for (let j = 0; j < block.text.length; j++) if (letterBoxes[positionIdx + j]) return;
             saveUndoState();
             for (let j = 0; j < block.text.length; j++) {
-                if (positionIdx + j < letterBoxes.length) { letterBoxes[positionIdx + j] = block.text[j].toUpperCase(); softLetters[positionIdx + j] = ''; }
+                letterBoxes[positionIdx + j] = block.text[j].toUpperCase(); softLetters[positionIdx + j] = '';
             }
             requiredBlocks = requiredBlocks.filter(b => b.id !== blockId);
             updateBlocksList();
@@ -1687,6 +1704,7 @@
         // applyPositionCombo. (Without a blockId we fall back to just placing the letter.)
         function applyLetterAt(letter, blockId, positionIdx) {
             if (positionIdx < 0 || positionIdx >= letterBoxes.length) return;
+            if (letterBoxes[positionIdx]) return; // never overwrite a hard letter on the board
             saveUndoState();
             // Carry over any leftovers still valid on the current board (e.g. a prior partial pick)
             // so borrowing letters from several blocks into one word all leave their leftovers behind.
@@ -1929,7 +1947,12 @@
                 const opacity = (0.18 + ratio * 0.82).toFixed(2);
                 const isBest = counts[i] === max;
                 const border = isBest ? '2px solid #000' : '1px solid rgba(0,0,0,0.18)';
-                html += `<div onclick="${clickFn}('${clickArg}', ${extraArg}${i})" style="display:flex;flex-direction:column;align-items:center;gap:2px;min-width:30px;cursor:pointer;" onmouseover="this.style.background='rgba(0,0,0,0.06)'" onmouseout="this.style.background=''">
+                // A 0-count position isn't placeable (it overlaps a filled box or matches no word) —
+                // keep the bar for scale, but clicking it would overwrite letters on the board.
+                const clickAttrs = counts[i] > 0
+                    ? `onclick="${clickFn}('${clickArg}', ${extraArg}${i})" onmouseover="this.style.background='rgba(0,0,0,0.06)'" onmouseout="this.style.background=''"`
+                    : `title="not placeable here"`;
+                html += `<div ${clickAttrs} style="display:flex;flex-direction:column;align-items:center;gap:2px;min-width:30px;cursor:${counts[i] > 0 ? 'pointer' : 'default'};">
                     <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.58rem;color:#444;line-height:1;">${counts[i].toLocaleString()}</div>
                     <div style="width:28px;height:${barH}px;background-color:${color};opacity:${opacity};border:${border};flex-shrink:0;"></div>
                     <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.65rem;font-weight:${isBest ? '700' : '400'};line-height:1;">${i + 1}</div>
@@ -2170,7 +2193,8 @@
             if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
             if (e.key && e.key.length === 1 && /^[a-zA-Z]$/.test(e.key)) {
                 e.preventDefault();
-                if (activeBox === null) { const ne = letterBoxes.findIndex(b => b === ''); moveActiveTo(ne !== -1 ? ne : 0); }
+                // No box selected and none empty: ignore the stray keystroke rather than overwrite box 1.
+                if (activeBox === null) { const ne = letterBoxes.findIndex(b => b === ''); if (ne === -1) return; moveActiveTo(ne); }
                 handleLetterInput(e.key.toUpperCase()); return;
             }
             if (e.key === 'Backspace') {
