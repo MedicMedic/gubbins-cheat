@@ -394,6 +394,10 @@
         const WORD_CACHE_KEY = 'word-buckets-v1';
         const MAX_VISIBLE_RESULTS = 300;
         let wordlistScriptPromise = null;
+        // Bump this whenever wordlist.js is regenerated. It cache-busts the script load so the browser
+        // (and any CDN) can't keep serving a stale file, which would leave the signature unchanged and
+        // silently skip the refresh in refreshWordDataInBackground().
+        const WORDLIST_ASSET_VERSION = '2026-07-02';
         let savedWords = [];
         const SAVED_WORDS_KEY = 'gubbins-saved-words';
         let removedWords = new Set();
@@ -502,14 +506,15 @@
             if (typeof WORD_LIST !== 'undefined') return Promise.resolve();
             if (wordlistScriptPromise) return wordlistScriptPromise;
             wordlistScriptPromise = new Promise((resolve, reject) => {
-                const existing = document.querySelector('script[src="wordlist.js"]');
+                const existing = document.querySelector('script[data-wordlist]');
                 if (existing) {
                     existing.addEventListener('load', () => resolve(), { once: true });
                     existing.addEventListener('error', (e) => reject(e), { once: true });
                     return;
                 }
                 const s = document.createElement('script');
-                s.src = 'wordlist.js';
+                s.src = 'wordlist.js?v=' + WORDLIST_ASSET_VERSION;
+                s.dataset.wordlist = '1';
                 s.defer = true;
                 s.onload = resolve;
                 s.onerror = reject;
