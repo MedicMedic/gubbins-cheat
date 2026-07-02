@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fill-in-the-Blanks Word Finder</title>
+    <title>Gubbins Cheat</title>
     <script src="https://cdn.tailwindcss.com" defer></script>
     <!-- Preconnect to font hosts to speed font loading -->
     <link rel="preconnect" href="https://fonts.cdnfonts.com">
@@ -184,21 +184,6 @@
         }
         .save-word-btn:hover, .save-word-btn.saved { color: #c49a22; }
 
-        /* Build-from button on result tiles: seed the board with this word as soft letters */
-        .build-from-btn {
-            position: absolute;
-            top: 3px; right: 22px;
-            background: none;
-            border: none !important;
-            color: rgba(0,0,0,0.18);
-            font-size: 0.82rem;
-            cursor: pointer;
-            line-height: 1;
-            padding: 2px 3px;
-            transition: color 100ms;
-        }
-        .build-from-btn:hover, .build-from-btn.active-base { color: #189973; }
-
         /* Saved words panel */
         .saved-word-item {
             display: flex;
@@ -267,7 +252,7 @@
 <body class="bg-gradient-to-br from-blue-50 to-blue-100 min-h-screen p-3 sm:p-6">
     <div class="max-w-6xl mx-auto">
         <div class="rounded-xl shadow-xl p-4 sm:p-8 inner-card" style="background-color: #eff0ea;">
-            <h1 class="text-2xl sm:text-4xl font-bold text-blue-700 mb-1">Gubbins Word Search Tool</h1>
+            <h1 class="text-2xl sm:text-4xl font-bold text-blue-700 mb-1">Gubbins Cheat</h1>
             <p class="text-sm text-gray-600 mb-1">Click boxes to enter letters, or filter by required letter blocks</p>
             <p class="text-xs text-gray-500 mb-5">Dictionary: <span id="wordCount">Loading...</span> words</p>
 
@@ -370,6 +355,8 @@
         </div>
     </div>
 
+    <!-- Shared block-placement matcher (also imported by blockWorker.js) — must load before the main script -->
+    <script src="matcher.js"></script>
     <script>
         let wordList = [];
         const wordBuckets = Object.create(null); // length -> [words]
@@ -403,10 +390,12 @@
         const SAVED_WORDS_KEY = 'gubbins-saved-words';
         let removedWords = new Set();
         const REMOVED_WORDS_KEY = 'gubbins-removed-words';
+        const BOARD_STATE_KEY = 'gubbins-board-state';
         const pendingRemovals = new Set();
         let bestPositionCombo = null; // [{blockIndex, start(0-indexed)}] from latest analysis
         let savedWordsExpanded = true;
-        let _undoState = null;
+        let _undoStack = [];      // snapshots, oldest first; in-memory only (a refresh clears it)
+        const MAX_UNDO_STEPS = 30;
 
         function clearBuckets() {
             for (const k in wordBuckets) delete wordBuckets[k];
@@ -560,180 +549,9 @@
             }
         }
 
-        // Fast pattern matcher without RegExp allocation
-        function matchesPattern(word, boxes) {
-            if (word.length !== boxes.length) return false;
-            for (let i = 0; i < boxes.length; i++) {
-                const b = boxes[i];
-                if (!b) continue;
-                if (word[i] !== b.toLowerCase()) return false;
-            }
-            return true;
-        }
-
-        function buildFilledPrefix(letterBoxesLocal) {
-            const prefix = new Array(letterBoxesLocal.length + 1).fill(0);
-            for (let i = 0; i < letterBoxesLocal.length; i++) {
-                prefix[i + 1] = prefix[i] + (letterBoxesLocal[i] && letterBoxesLocal[i] !== '' ? 1 : 0);
-            }
-            return prefix;
-        }
-
-        function hasFilledInRange(prefix, start, length) {
-            return (prefix[start + length] - prefix[start]) > 0;
-        }
-
-        // Block-placement matcher (moved out so it can be reused or run in a worker).
-        // A block may be used FULLY (its whole sequence, contiguous) or PARTIALLY (one of its
-        // letters, the rest left over). Full uses are chosen first and always preferred; remaining
-        // blocks then lend a single letter into still-free positions via bipartite matching.
-        // A per-block letter mask from disabled letters: null = unrestricted; otherwise the whole tile
-        // can't be placed (a disabled letter wouldn't be used) and only `allowed` letters can be borrowed.
-        function buildBlockMask(block) {
-            const dis = block && block.disabled;
-            if (!dis || dis.length === 0) return null;
-            const allowed = [];
-            for (let i = 0; i < block.text.length; i++) if (!dis.includes(i)) allowed.push(block.text[i]);
-            return { wholeAllowed: false, allowed };
-        }
-
-        // Returns { placements:[{blockIndex,start,length,partial,leftover?}], count, fullCount, totalLength }.
-        // `forced` (optional): { blockIndex: {start,length} } — manual "use this letter here" choices
-        // that are pre-placed; the remaining blocks are then optimized around them.
-        // `masks` (optional): per-block { wholeAllowed, allowed } from disabled letters (or null entries).
-        function matchBlocksForWord(word, blocks, filledPrefix, forced, masks) {
-            if (!blocks || blocks.length === 0) return { placements: [], count: 0, fullCount: 0, totalLength: 0 };
-            const n = blocks.length;
-
-            function leftoverOf(bi, start, length) {
-                if (length === blocks[bi].length) return '';
-                const ch = word[start];
-                const at = blocks[bi].indexOf(ch);
-                return at >= 0 ? blocks[bi].slice(0, at) + blocks[bi].slice(at + 1) : blocks[bi];
-            }
-
-            const occupied = new Array(word.length).fill(false);
-            for (let i = 0; i < word.length; i++) if (hasFilledInRange(filledPrefix, i, 1)) occupied[i] = true;
-
-            // --- 0) Pre-place any forced (user-chosen) placements ---
-            // An override of { off:true } means "don't use this block in this word at all" — it gets
-            // neither a full placement nor an auto-lent letter, so saving won't force it onto the board.
-            const placements = [];
-            const isForced = new Array(n).fill(false);
-            const offBlock = new Array(n).fill(false);
-            if (forced) {
-                for (const key in forced) {
-                    const bi = +key;
-                    if (bi < 0 || bi >= n) continue;
-                    const f = forced[key];
-                    if (f && f.off) { isForced[bi] = true; offBlock[bi] = true; continue; }
-                    const { start, length } = f;
-                    for (let i = start; i < start + length; i++) if (i >= 0 && i < word.length) occupied[i] = true;
-                    placements.push({ blockIndex: bi, start, length, partial: length !== blocks[bi].length, leftover: leftoverOf(bi, start, length) });
-                    isForced[bi] = true;
-                }
-            }
-
-            // --- 1) Best set of non-overlapping FULL placements for the remaining blocks ---
-            const fullPositions = blocks.map((block, bi) => {
-                const starts = [];
-                if (isForced[bi]) return starts;
-                if (masks && masks[bi] && !masks[bi].wholeAllowed) return starts; // disabled letter ⇒ no whole-tile use
-                const bl = block.length;
-                for (let i = 0; i <= word.length - bl; i++) {
-                    let ok = true;
-                    for (let j = 0; j < bl; j++) if (occupied[i + j]) { ok = false; break; }
-                    if (ok && word.startsWith(block, i)) starts.push(i);
-                }
-                return starts;
-            });
-            const order = [];
-            for (let i = 0; i < n; i++) if (!isForced[i]) order.push(i);
-            order.sort((a, b) => {
-                const la = blocks[a].length, lb = blocks[b].length;
-                if (lb !== la) return lb - la;
-                return fullPositions[a].length - fullPositions[b].length;
-            });
-            let bestFull = { placements: [], count: 0, totalLength: 0 };
-            const used = [];
-            function overlapsRange(s, e) {
-                for (const u of used) { if (!(e < u.start || s > u.end)) return true; }
-                return false;
-            }
-            function backtrack(idx, cur, curLen) {
-                if (idx === order.length) {
-                    if (cur.length > bestFull.count || (cur.length === bestFull.count && curLen > bestFull.totalLength))
-                        bestFull = { placements: cur.slice(), count: cur.length, totalLength: curLen };
-                    return;
-                }
-                const bi = order[idx];
-                const bl = blocks[bi].length;
-                for (const s of fullPositions[bi]) {
-                    const e = s + bl - 1;
-                    if (overlapsRange(s, e)) continue;
-                    used.push({ start: s, end: e });
-                    cur.push({ blockIndex: bi, start: s, length: bl, partial: false });
-                    backtrack(idx + 1, cur, curLen + bl);
-                    cur.pop(); used.pop();
-                }
-                backtrack(idx + 1, cur, curLen);
-            }
-            backtrack(0, [], 0);
-            for (const p of bestFull.placements) placements.push(p);
-
-            // --- 2) Lend a single letter from each not-yet-used block into a free position ---
-            for (const p of placements) for (let i = p.start; i < p.start + p.length; i++) occupied[i] = true;
-            const usedBlock = new Array(n).fill(false);
-            for (const p of placements) usedBlock[p.blockIndex] = true;
-            const freePos = [];
-            for (let i = 0; i < word.length; i++) if (!occupied[i]) freePos.push(i);
-
-            if (freePos.length) {
-                const blockLetterSet = blocks.map((b, bi) => (masks && masks[bi]) ? new Set(masks[bi].allowed) : new Set(b.split('')));
-                const posOwner = new Map(); // free position -> blockIndex it currently lends to
-                function tryAssign(bi, seen) {
-                    for (const pos of freePos) {
-                        if (seen.has(pos) || !blockLetterSet[bi].has(word[pos])) continue;
-                        seen.add(pos);
-                        if (!posOwner.has(pos) || tryAssign(posOwner.get(pos), seen)) {
-                            posOwner.set(pos, bi);
-                            return true;
-                        }
-                    }
-                    return false;
-                }
-                for (let bi = 0; bi < n; bi++) {
-                    if (!usedBlock[bi] && !offBlock[bi] && blocks[bi].length >= 2) tryAssign(bi, new Set());
-                }
-                for (const [pos, bi] of posOwner.entries()) {
-                    placements.push({ blockIndex: bi, start: pos, length: 1, partial: true, leftover: leftoverOf(bi, pos, 1) });
-                }
-            }
-
-            let totalLength = 0, fullCount = 0;
-            for (const p of placements) { totalLength += p.length; if (!p.partial) fullCount++; }
-            return { placements, count: placements.length, fullCount, totalLength };
-        }
-
-        // All candidate placements (full + single-letter) for one block in a word, given which
-        // positions are already taken by filled boxes and the OTHER blocks' current placements.
-        function candidatePlacementsForBlock(word, blocks, bi, occupied, mask) {
-            const block = blocks[bi], bl = block.length, cands = [];
-            if (!(mask && !mask.wholeAllowed)) {                  // full (skipped if a letter is disabled)
-                for (let i = 0; i <= word.length - bl; i++) {
-                    let ok = true;
-                    for (let j = 0; j < bl; j++) if (occupied[i + j]) { ok = false; break; }
-                    if (ok && word.startsWith(block, i)) cands.push({ start: i, length: bl });
-                }
-            }
-            if (bl >= 2) {                                        // single letters
-                for (let i = 0; i < word.length; i++) {
-                    if (!occupied[i] && block.indexOf(word[i]) !== -1 && (!mask || mask.allowed.includes(word[i]))) cands.push({ start: i, length: 1 });
-                }
-            }
-            cands.sort((a, b) => a.start - b.start || b.length - a.length);
-            return cands;
-        }
+        // Pattern/block matching functions (matchesPattern, buildFilledPrefix, hasFilledInRange,
+        // buildBlockMask, matchBlocksForWord, candidatePlacementsForBlock) live in matcher.js,
+        // shared with blockWorker.js.
 
         // Click a placed letter on a result tile to cycle which letter of that block is used.
         function cycleBlockBorrow(word, blockIndex) {
@@ -781,24 +599,10 @@
         if (window.Worker) {
             try {
                 blockWorker = new Worker('blockWorker.js');
-                // accumulate worker chunks and render once when the job is complete
-                const workerResultsAccum = Object.create(null);
                 blockWorker.onmessage = function(e) {
-                    const { jobId, partial, results, done } = e.data;
+                    const { jobId, results } = e.data;
                     if (jobId !== latestJobId) return; // stale
-                    if (partial) {
-                        if (!workerResultsAccum[jobId]) workerResultsAccum[jobId] = [];
-                        if (partial.length) workerResultsAccum[jobId].push(...partial);
-                        if (done) {
-                            const finalResults = workerResultsAccum[jobId] || [];
-                            delete workerResultsAccum[jobId];
-                            renderResultsFromMeta(finalResults);
-                        }
-                        return;
-                    }
-                    if (results) {
-                        renderResultsFromMeta(results);
-                    }
+                    if (results) renderResultsFromMeta(results);
                 };
             } catch (err) {
                 blockWorker = null;
@@ -948,6 +752,9 @@
         }
 
         function updateResults() {
+            // Every board mutation funnels through here (via scheduleUpdateResults), so this is
+            // the one place the live board gets persisted.
+            persistBoardState();
             const raw = wordBuckets[wordLength] || [];
             const candidates = removedWords.size > 0 ? raw.filter(w => !removedWords.has(w)) : raw;
             const blockTexts = requiredBlocks.map(b => b.text);
@@ -1103,19 +910,6 @@
             schedulePositionAnalysis();
         }
 
-        function promoteSoftToHard(index) {
-            if (!softLetters[index]) return;
-            saveUndoState();
-            letterBoxes[index] = softLetters[index];
-            softLetters[index] = '';
-            softMode[index] = 0;
-            updateBoxDisplay();
-            updateClearButton();
-            updateSoftControls();
-            scheduleUpdateResults();
-            schedulePositionAnalysis();
-        }
-
         function clearSoftBox(index) {
             if (!softLetters[index]) return;
             saveUndoState();
@@ -1151,21 +945,6 @@
             schedulePositionAnalysis();
         }
 
-        // Seed the board with a result word as soft letters (replaces any existing base).
-        function buildFromWord(word) {
-            saveUndoState();
-            softLetters = Array(wordLength).fill('');
-            softMode = Array(wordLength).fill(0);
-            for (let i = 0; i < word.length && i < wordLength; i++) {
-                if (!letterBoxes[i]) softLetters[i] = word[i].toUpperCase();
-            }
-            updateBoxDisplay();
-            updateBoxStyles();
-            updateSoftControls();
-            scheduleUpdateResults();
-            schedulePositionAnalysis();
-        }
-
         function updateSoftControls() {
             const hasSoft = softLetters.some(s => s);
             const lockBtn = document.getElementById('lockBaseBtn');
@@ -1183,11 +962,6 @@
             if (label) label.textContent = reqCount > 0
                 ? `Only show words matching the ${reqCount} required letter${reqCount === 1 ? '' : 's'}`
                 : 'Only show words matching the base';
-            // Mark which result tile is the active base
-            const base = hasSoft ? softLetters.map((s, i) => (letterBoxes[i] || s || '').toLowerCase()).join('') : '';
-            document.querySelectorAll('.build-from-btn').forEach(btn => {
-                btn.classList.toggle('active-base', hasSoft && btn.dataset.word === base);
-            });
         }
 
         function updateBoxDisplay() {
@@ -1241,7 +1015,7 @@
         }
 
         function saveUndoState() {
-            _undoState = {
+            _undoStack.push({
                 wordLength,
                 letterBoxes: letterBoxes.slice(),
                 softLetters: softLetters.slice(),
@@ -1249,19 +1023,19 @@
                 requiredBlocks: requiredBlocks.map(b => ({...b, disabled: b.disabled ? b.disabled.slice() : undefined})),
                 comboLeftovers: _comboLeftovers ? { cells: _comboLeftovers.cells.map(c => c.slice()), drops: _comboLeftovers.drops.map(d => ({...d})) } : null,
                 pendingLeftovers: _pendingLeftovers.map(d => ({...d}))
-            };
+            });
+            if (_undoStack.length > MAX_UNDO_STEPS) _undoStack.shift();
             updateUndoButton();
         }
 
         function updateUndoButton() {
             const btn = document.getElementById('undoBtn');
-            if (btn) btn.style.display = _undoState ? 'inline-flex' : 'none';
+            if (btn) btn.style.display = _undoStack.length ? 'inline-flex' : 'none';
         }
 
         function undo() {
-            if (!_undoState) return;
-            const st = _undoState;
-            _undoState = null;
+            const st = _undoStack.pop();
+            if (!st) return;
             // Restore across a word-length change: rebuild the DOM row to the saved length first, or
             // the restored arrays would be misaligned with the boxes on screen.
             if (st.wordLength && st.wordLength !== wordLength) {
@@ -1387,6 +1161,61 @@
             if (clearBtn) clearBtn.style.display = requiredBlocks.length ? 'inline-flex' : 'none';
         }
 
+        // ---- Board persistence: the live board survives a reload ------------
+        // (Saved words, hidden words, and the word cache have their own keys; this covers the
+        // letter boxes, ghosts, required blocks, leftover queue, and the filter toggles.)
+        function persistBoardState() {
+            try {
+                localStorage.setItem(BOARD_STATE_KEY, JSON.stringify({
+                    v: 1,
+                    wordLength,
+                    letterBoxes,
+                    softLetters,
+                    softMode,
+                    requiredBlocks,
+                    pendingLeftovers: _pendingLeftovers,
+                    comboLeftovers: _comboLeftovers,
+                    filterByBlocks,
+                    softFilterMode,
+                    ignoreSoft
+                }));
+            } catch (_) {}
+        }
+
+        function loadBoardState() {
+            let st = null;
+            try { st = JSON.parse(localStorage.getItem(BOARD_STATE_KEY) || 'null'); } catch (_) {}
+            if (!st || st.v !== 1 || !Array.isArray(st.letterBoxes)) return;
+            wordLength = parseInt(st.wordLength) || 9;
+            const sel = document.getElementById('wordLength');
+            if (sel) sel.value = wordLength;
+            initializeBoxes(); // rebuild the DOM row to the restored length
+            const fit = (a, fill) => {
+                const out = Array.isArray(a) ? a.slice(0, wordLength) : [];
+                while (out.length < wordLength) out.push(fill);
+                return out;
+            };
+            letterBoxes = fit(st.letterBoxes, '');
+            softLetters = fit(st.softLetters, '');
+            softMode = fit(st.softMode, 0);
+            requiredBlocks = Array.isArray(st.requiredBlocks) ? st.requiredBlocks : [];
+            _pendingLeftovers = Array.isArray(st.pendingLeftovers) ? st.pendingLeftovers : [];
+            _comboLeftovers = (st.comboLeftovers && Array.isArray(st.comboLeftovers.cells) && Array.isArray(st.comboLeftovers.drops)) ? st.comboLeftovers : null;
+            filterByBlocks = !!st.filterByBlocks;
+            softFilterMode = !!st.softFilterMode;
+            ignoreSoft = !!st.ignoreSoft;
+            const fb = document.getElementById('filterByBlocks');
+            if (fb) fb.checked = filterByBlocks;
+            const sf = document.getElementById('softFilterMode');
+            if (sf) sf.checked = softFilterMode;
+            const ig = document.getElementById('ignoreSoftLetters');
+            if (ig) ig.checked = ignoreSoft;
+            updateBlocksList();
+            updateBoxDisplay();
+            updateClearButton();
+            updateSoftControls();
+        }
+
         function loadRemovedWords() {
             try {
                 const raw = localStorage.getItem(REMOVED_WORDS_KEY);
@@ -1469,6 +1298,9 @@
             pendingRemovals.delete(word);
             removedWords.add(word);
             persistRemovedWords();
+            // Drop it from the last render too, or a placed-letter click (which re-renders from
+            // this array) would resurrect the removed tile.
+            _lastRenderedResults = _lastRenderedResults.filter(r => r.word !== word);
             document.querySelectorAll('.result-tile').forEach(tile => {
                 if (tile.querySelector(`.save-word-btn[data-word="${word}"]`)) tile.remove();
             });
@@ -2217,6 +2049,7 @@
         initializeBoxes();
         loadRemovedWords();
         loadSavedWords();
+        loadBoardState();
 
         // Create a small hidden input that receives focus on mobile to open the soft keyboard
         function createHiddenInput() {
