@@ -367,7 +367,7 @@
         let ignoreSoft = false;      // true = ignore soft letters entirely (no ranking boost, no filtering)
         let placementOverrides = {}; // word -> { blockIndex: {start,length} }: manual "use this letter" choices
         let _comboLeftovers = null;  // { cells:[[pos,'CH']], drops:[{start,letters}] }: leftover tiles from an applied partial combo, dropped when the word is played (valid while its placed cells are intact)
-        let _pendingLeftovers = [];  // [{start,letter}]: leftover tiles from played words. Each is its own tile on the board and seeds its OWN next word — one letter per row, dealt out one per play.
+        let _pendingLeftovers = [];  // queue of rows: [[{start,letter}, ...], ...]. Leftover tiles from played words; one ROW is dealt out per play — leftovers from different blocks played together share a row (same next word), a block's 2nd/3rd leftover letter sits in a later row.
         let _overrideSig = null;     // invalidates overrides when the pattern/blocks/length change
         let _lastRenderedResults = [];
         let requiredBlocks = [];
@@ -1022,7 +1022,7 @@
                 softMode: softMode.slice(),
                 requiredBlocks: requiredBlocks.map(b => ({...b, disabled: b.disabled ? b.disabled.slice() : undefined})),
                 comboLeftovers: _comboLeftovers ? { cells: _comboLeftovers.cells.map(c => c.slice()), drops: _comboLeftovers.drops.map(d => ({...d})) } : null,
-                pendingLeftovers: _pendingLeftovers.map(d => ({...d}))
+                pendingLeftovers: _pendingLeftovers.map(row => row.map(d => ({...d})))
             });
             if (_undoStack.length > MAX_UNDO_STEPS) _undoStack.shift();
             updateUndoButton();
@@ -1199,7 +1199,9 @@
             softLetters = fit(st.softLetters, '');
             softMode = fit(st.softMode, 0);
             requiredBlocks = Array.isArray(st.requiredBlocks) ? st.requiredBlocks : [];
-            _pendingLeftovers = Array.isArray(st.pendingLeftovers) ? st.pendingLeftovers : [];
+            // Older saves stored a flat one-letter-per-entry queue; wrap each entry as its own row.
+            const pend = Array.isArray(st.pendingLeftovers) ? st.pendingLeftovers : [];
+            _pendingLeftovers = pend.map(r => Array.isArray(r) ? r : [r]);
             _comboLeftovers = (st.comboLeftovers && Array.isArray(st.comboLeftovers.cells) && Array.isArray(st.comboLeftovers.drops)) ? st.comboLeftovers : null;
             filterByBlocks = !!st.filterByBlocks;
             softFilterMode = !!st.softFilterMode;
@@ -1379,20 +1381,38 @@
             // must not throw them away.
             const comboDrops = comboLeftoversValid() ? _comboLeftovers.drops : [];
             _comboLeftovers = null;
-            // Every leftover letter is its own tile on the board and seeds its OWN next word — one
-            // leftover letter per row (splitting a 3-letter block means TWO new words). Queue them
-            // all; one is dealt out per play.
+            // Leftover letters seed the next words. Leftovers from DIFFERENT blocks played together
+            // land in the SAME next word, each in its borrowed letter's column — like the game, where
+            // every spare letter of a played block sits in the row adjacent to the word. A block's
+            // 2nd/3rd leftover letter sits one row further out in that same column, so it seeds the
+            // word AFTER (splitting a 3-letter block still means TWO new words). Queue rows of
+            // leftovers; one row is dealt out per play.
+            const newRows = [];
+            const queueLeftovers = (start, letters) => {
+                for (let k = 0; k < letters.length; k++) {
+                    if (!newRows[k]) newRows[k] = [];
+                    newRows[k].push({ start, letter: letters[k] });
+                }
+            };
             for (const p of placements) {
-                if (p.partial && p.leftover) for (const ch of p.leftover) _pendingLeftovers.push({ start: p.start, letter: ch });
+                if (p.partial && p.leftover) queueLeftovers(p.start, p.leftover);
             }
-            for (const d of comboDrops) for (const ch of d.letters) _pendingLeftovers.push({ start: d.start, letter: ch });
+            for (const d of comboDrops) queueLeftovers(d.start, d.letters);
+            _pendingLeftovers.push(...newRows);
             letterBoxes = Array(wordLength).fill('');
             softLetters = Array(wordLength).fill('');
             softMode = Array(wordLength).fill(0);
-            // Seed the next word with the oldest pending leftover, in the column its borrowed letter
-            // occupied — that's the crossing point you'll build the next word off.
-            const nextLeftover = _pendingLeftovers.shift();
-            if (nextLeftover) letterBoxes[Math.min(nextLeftover.start, wordLength - 1)] = nextLeftover.letter.toUpperCase();
+            // Seed the next word with the oldest pending row of leftovers, each in the column its
+            // borrowed letter occupied — those are the crossing points you'll build the next word
+            // off. (Spill to the next free box if two letters land on the same column.)
+            const nextRow = _pendingLeftovers.shift();
+            if (nextRow) {
+                for (const lo of nextRow) {
+                    let pos = Math.min(lo.start, wordLength - 1);
+                    while (pos < wordLength && letterBoxes[pos] !== '') pos++;
+                    if (pos < wordLength) letterBoxes[pos] = lo.letter.toUpperCase();
+                }
+            }
             activeBox = null;
             updateBlocksList();
             updateBoxDisplay();
