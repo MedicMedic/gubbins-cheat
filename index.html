@@ -386,6 +386,24 @@
         // (and any CDN) can't keep serving a stale file, which would leave the signature unchanged and
         // silently skip the refresh in refreshWordDataInBackground().
         const WORDLIST_ASSET_VERSION = '2026-07-02';
+
+        // Gubbins' own scoring rule (pulled from the game's "Score Settings" asset): every letter
+        // scores a base 10, plus a per-letter bonus by rarity tier. The game also applies a length
+        // multiplier, but that's constant across every candidate in a given search (they're all the
+        // same length), so it can't change their relative order — only the letter-bonus sum can.
+        const LETTER_BASE_SCORE = 10;
+        const LETTER_TIER_BONUS = (() => {
+            const tiers = [[0, 'EISARNTOLCUD'], [10, 'PMGHBYFVKW'], [40, 'ZXQJ']];
+            const map = {};
+            for (const [bonus, letters] of tiers) for (const ch of letters) map[ch] = bonus;
+            return map;
+        })();
+
+        function wordScore(word) {
+            let s = 0;
+            for (let i = 0; i < word.length; i++) s += LETTER_BASE_SCORE + (LETTER_TIER_BONUS[word[i].toUpperCase()] || 0);
+            return s;
+        }
         let savedWords = [];
         const SAVED_WORDS_KEY = 'gubbins-saved-words';
         let removedWords = new Set();
@@ -635,6 +653,9 @@
                     const aBlkFull = a.match.fullCount || 0, bBlkFull = b.match.fullCount || 0;
                     if (bBlkFull !== aBlkFull) return bBlkFull - aBlkFull;
                     if (b.match.count !== a.match.count) return b.match.count - a.match.count;
+                    // Highest in-game score next; alphabetical is only the final tiebreak for exact ties.
+                    const bWordScore = wordScore(b.word), aWordScore = wordScore(a.word);
+                    if (bWordScore !== aWordScore) return bWordScore - aWordScore;
                     return a.word.localeCompare(b.word);
                 });
             }
@@ -813,7 +834,7 @@
                 if (filterByBlocks && match.count === 0) continue;
                 resultsWithMeta.push({ word: w, match, softScore, softFull: softTotal > 0 && softScore === softTotal });
             }
-            renderResultsFromMeta(resultsWithMeta, { skipSort: requiredBlocks.length === 0 && softTotal === 0 });
+            renderResultsFromMeta(resultsWithMeta);
         }
 
         // on-screen keyboard removed; physical keyboard typing is supported
