@@ -19,11 +19,11 @@ self.onmessage = function(e) {
         // Soft "base" letters: count matches for ranking; optionally filter. When some ghosts are
         // marked required, the filter requires only those; otherwise it requires all soft letters.
         let softScore = 0;
-        for (let k = 0; k < softArr.length; k++) { if (softArr[k] && w[k] === softArr[k]) softScore++; }
+        for (let k = 0; k < softArr.length; k++) { if (softArr[k] && (softArr[k] === '?' || w[k] === softArr[k])) softScore++; }
         if (softFilter) {
             if (softReqCount > 0) {
                 let ok = true;
-                for (let k = 0; k < softReqArr.length; k++) { if (softReqArr[k] && w[k] !== softReqArr[k]) { ok = false; break; } }
+                for (let k = 0; k < softReqArr.length; k++) { if (softReqArr[k] && softReqArr[k] !== '?' && w[k] !== softReqArr[k]) { ok = false; break; } }
                 if (!ok) continue;
             } else if (softCount > 0 && softScore !== softCount) continue;
         }

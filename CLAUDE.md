@@ -26,6 +26,24 @@ the app on launch. To pull and regenerate:
 (env=`dev`, bucket=`48d9bd7d-2c77-4798-b58c-922156393430`, badge=`latest` may change with
 game updates — re-read `settings.json` from a freshly pulled APK if the fetch 404s.)
 
+## Game art (pencil.png)
+
+`pencil.png` is the actual in-game pencil gubbin sprite (`Gubbin_Pencil_Small_Idle_0001Sprite`),
+extracted 2026-09-01. The game's art is SVG-imported **vector sprites** (tessellated meshes with
+per-vertex colors, no Texture2D), so UnityPy's `.image` fails with `PPtr ... m_PathID == 0`.
+To extract more art:
+
+1. Pull the APK splits over adb (`adb shell pm path com.StudioFolly.GUBBINS`, then `adb pull`).
+   Sprites live in `split_UnityDataAssetPack.apk` → `assets/bin/Data/datapack.unity3d`.
+2. Load with UnityPy, find the Sprite by name, and read its typetree: positions are float3 in
+   vertex stream 0, RGBA8 color + float2 UV in stream 1. **Stream 1 starts 16-byte-aligned after
+   stream 0** (`(n*12 + 15) & ~15`) — without the alignment the colors come out white/shifted.
+3. Rasterize the `m_IndexBuffer` (uint16) triangles with each triangle filled by its first
+   vertex's color (shapes are solid-colored), flipping Y. Supersample 4x, then downscale.
+
+Other pencil frames and every other gubbin (`Gubbin_*_Small_Idle_*Sprite`, etc.) extract the
+same way.
+
 ## Word Blacklist
 
 These 9-letter words have been intentionally removed and must **not** be re-added to `wordlist.js`.

@@ -1,15 +1,33 @@
 // Shared block-placement matcher, used by both the page (index.html) and blockWorker.js
 // (via importScripts). Keep all matching logic here so the two never drift apart.
 
-// Fast pattern matcher without RegExp allocation
+// Fast pattern matcher without RegExp allocation. A '?' box is a pencil: some letter will be
+// written there, so it matches any letter (but still counts as a filled cell for placement).
 function matchesPattern(word, boxes) {
     if (word.length !== boxes.length) return false;
     for (let i = 0; i < boxes.length; i++) {
         const b = boxes[i];
-        if (!b) continue;
+        if (!b || b === '?') continue;
         if (word[i] !== b.toLowerCase()) return false;
     }
     return true;
+}
+
+// Wildcard-aware startsWith: does `block` fit the word at position i? A '?' in a block is a
+// pencil letter that matches anything.
+function blockMatchesAt(word, block, i) {
+    if (i < 0 || i + block.length > word.length) return false;
+    for (let j = 0; j < block.length; j++) {
+        const c = block[j];
+        if (c !== '?' && word[i + j] !== c) return false;
+    }
+    return true;
+}
+
+// Can this block lend the single letter `ch`? True if the letter is in the block, or the block
+// holds a pencil ('?') that can be written as `ch`.
+function blockHasLetter(block, ch) {
+    return block.indexOf(ch) !== -1 || block.indexOf('?') !== -1;
 }
 
 function buildFilledPrefix(letterBoxesLocal) {
@@ -49,7 +67,8 @@ function matchBlocksForWord(word, blocks, filledPrefix, forced, masks) {
     function leftoverOf(bi, start, length) {
         if (length === blocks[bi].length) return '';
         const ch = word[start];
-        const at = blocks[bi].indexOf(ch);
+        let at = blocks[bi].indexOf(ch);
+        if (at < 0) at = blocks[bi].indexOf('?'); // the pencil was written as this letter
         return at >= 0 ? blocks[bi].slice(0, at) + blocks[bi].slice(at + 1) : blocks[bi];
     }
 
@@ -84,7 +103,7 @@ function matchBlocksForWord(word, blocks, filledPrefix, forced, masks) {
         for (let i = 0; i <= word.length - bl; i++) {
             let ok = true;
             for (let j = 0; j < bl; j++) if (occupied[i + j]) { ok = false; break; }
-            if (ok && word.startsWith(block, i)) starts.push(i);
+            if (ok && blockMatchesAt(word, block, i)) starts.push(i);
         }
         return starts;
     });
@@ -134,7 +153,7 @@ function matchBlocksForWord(word, blocks, filledPrefix, forced, masks) {
         const posOwner = new Map(); // free position -> blockIndex it currently lends to
         function tryAssign(bi, seen) {
             for (const pos of freePos) {
-                if (seen.has(pos) || !blockLetterSet[bi].has(word[pos])) continue;
+                if (seen.has(pos) || !(blockLetterSet[bi].has(word[pos]) || blockLetterSet[bi].has('?'))) continue;
                 seen.add(pos);
                 if (!posOwner.has(pos) || tryAssign(posOwner.get(pos), seen)) {
                     posOwner.set(pos, bi);
@@ -164,12 +183,12 @@ function candidatePlacementsForBlock(word, blocks, bi, occupied, mask) {
         for (let i = 0; i <= word.length - bl; i++) {
             let ok = true;
             for (let j = 0; j < bl; j++) if (occupied[i + j]) { ok = false; break; }
-            if (ok && word.startsWith(block, i)) cands.push({ start: i, length: bl });
+            if (ok && blockMatchesAt(word, block, i)) cands.push({ start: i, length: bl });
         }
     }
     if (bl >= 2) {                                        // single letters
         for (let i = 0; i < word.length; i++) {
-            if (!occupied[i] && block.indexOf(word[i]) !== -1 && (!mask || mask.allowed.includes(word[i]))) cands.push({ start: i, length: 1 });
+            if (!occupied[i] && blockHasLetter(block, word[i]) && (!mask || mask.allowed.includes(word[i]) || mask.allowed.includes('?'))) cands.push({ start: i, length: 1 });
         }
     }
     cands.sort((a, b) => a.start - b.start || b.length - a.length);

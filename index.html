@@ -134,7 +134,15 @@
         .block-color-6 { background-color: #fef3c7; }
         .block-color-7 { background-color: #d1fae5; }
         .block-color-8 { background-color: #e9d5ff; }
-        .block-span { padding: 0 0.2rem; border-radius: 0.3rem; display: inline-block; }
+        .block-span { padding: 0 0.2rem; border-radius: 0.3rem; display: inline-block; position: relative; }
+        /* The pencil gubbin (sprite pulled from the game): occupies a board cell as a wildcard */
+        .pencil-img { width: 68%; height: 68%; object-fit: contain; pointer-events: none; }
+        .letter-box.pencil-box { cursor: not-allowed; }
+        /* Little pencil badge on a result/saved cell whose letter the pencil auto-resolves to */
+        .pencil-mark { position: absolute; top: -8px; right: -6px; width: 1em; height: 1em; line-height: 1; pointer-events: none; }
+        .pencil-mark img { width: 100%; height: 100%; object-fit: contain; }
+        .pencil-cell { background-color: rgba(218, 134, 10, 0.35); border: 1px dashed rgba(0,0,0,0.5) !important; }
+        .clear-blocks-btn .icon img { width: 1.15em; height: 1.15em; object-fit: contain; }
         .required-block { border: 2px solid #000; border-radius: 0; color: #000; padding: 0.55rem 0.55rem; font-size: 2rem; display: inline-flex; align-items: center; gap: 0.5rem; text-transform: uppercase; letter-spacing: 0.12em; font-family: 'Banana Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
 
         .clear-blocks-btn { background: #e6bda1; border: 2px solid #000; color: #000; display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0.25rem; width: 42px; overflow: hidden; white-space: nowrap; cursor: pointer; transition: width 180ms ease, background 120ms; font-size: 1.25rem; }
@@ -253,7 +261,7 @@
     <div class="max-w-6xl mx-auto">
         <div class="rounded-xl shadow-xl p-4 sm:p-8 inner-card" style="background-color: #eff0ea;">
             <h1 class="text-2xl sm:text-4xl font-bold text-blue-700 mb-1">Gubbins Cheat</h1>
-            <p class="text-sm text-gray-600 mb-1">Click boxes to enter letters, or filter by required letter blocks</p>
+            <p class="text-sm text-gray-600 mb-1">Click boxes to enter letters, or filter by required letter blocks &mdash; the Pencil button (or ?) marks a square held by a pencil</p>
             <p class="text-xs text-gray-500 mb-5">Dictionary: <span id="wordCount">Loading...</span> words</p>
 
             <!-- Word Length Selector -->
@@ -276,6 +284,7 @@
                 <div class="flex items-center justify-between mb-2">
                     <label class="block text-sm font-semibold text-gray-700">Fill in the blanks</label>
                     <div class="flex gap-2">
+                        <button id="pencilBtn" class="clear-blocks-btn" title="Put a pencil in the selected box — it matches any letter" onclick="placePencil()"><span class="icon"><img src="pencil.png" alt="pencil"></span><span class="label">Pencil</span></button>
                         <button id="lockBaseBtn" class="clear-blocks-btn" title="Lock all base letters" style="display:none;" onclick="lockAllSoft()"><span class="icon">🔒</span><span class="label">Lock Base</span></button>
                         <button id="clearBaseBtn" class="clear-blocks-btn" title="Clear base letters" style="display:none;" onclick="clearAllSoft()"><span class="icon">⌫</span><span class="label">Clear Base</span></button>
                         <button id="undoBtn" class="clear-blocks-btn" title="Undo last action" style="display:none;" onclick="undo()"><span class="icon">↩</span><span class="label">Undo</span></button>
@@ -713,7 +722,12 @@
                         for (let i = 0; i < w.length; i++) {
                             const cell = cellMap[i];
                             if (cell === null) {
-                                html += `<span>${w[i]}</span>`;
+                                // A pencil on the board auto-resolves per word — show what it becomes here.
+                                if (letterBoxes[i] === '?') {
+                                    html += `<span class="block-span pencil-cell" title="the pencil resolves to ${w[i].toUpperCase()} for this word">${w[i]}${PENCIL_BADGE}</span>`;
+                                } else {
+                                    html += `<span>${w[i]}</span>`;
+                                }
                             } else if (cell.off) {
                                 const blkTxt = requiredBlocks[cell.bi] ? requiredBlocks[cell.bi].text.toUpperCase() : '';
                                 html += `<span class="block-span block-span-off borrow-cell" title="${blkTxt} not used here — click to use it" onclick="cycleBlockBorrow('${w}', ${cell.bi})">${w[i]}</span>`;
@@ -820,11 +834,11 @@
                 const w = candidates[i];
                 if (!matchesPattern(w, letterBoxes)) continue;
                 let softScore = 0;
-                for (let k = 0; k < soft.length; k++) { if (soft[k] && w[k] === soft[k]) softScore++; }
+                for (let k = 0; k < soft.length; k++) { if (soft[k] && (soft[k] === '?' || w[k] === soft[k])) softScore++; }
                 if (softFilterActive) {
                     if (softReqTotal > 0) {
                         let ok = true;
-                        for (let k = 0; k < softReq.length; k++) { if (softReq[k] && w[k] !== softReq[k]) { ok = false; break; } }
+                        for (let k = 0; k < softReq.length; k++) { if (softReq[k] && softReq[k] !== '?' && w[k] !== softReq[k]) { ok = false; break; } }
                         if (!ok) continue;
                     } else if (softTotal > 0 && softScore !== softTotal) continue;
                 }
@@ -860,7 +874,32 @@
             return `rgba(${r}, ${g}, ${b}, ${alpha})`;
         }
 
+        // '?' in a letter box = a pencil gubbin occupies that square. It matches any letter
+        // (forever — it re-resolves per word), counts as a filled cell so blocks can't land on
+        // it, and refuses typed letters until the pencil is cleared with its ×.
+        const PENCIL_IMG = '<img src="pencil.png" alt="pencil" class="pencil-img">';
+        const PENCIL_BADGE = '<span class="pencil-mark"><img src="pencil.png" alt="(pencil)"></span>';
+
+        function placePencil() {
+            // Drop a pencil into the selected box; with no (usable) selection, the first empty box.
+            // Pencils only land on empty squares — never overwrite a letter.
+            if (activeBox === null || letterBoxes[activeBox] !== '') {
+                const ne = letterBoxes.findIndex(b => b === '');
+                if (ne === -1) return;
+                moveActiveTo(ne);
+            }
+            handleLetterInput('?');
+        }
+
         function handleBoxClick(index) {
+            // A pencil-occupied box can't take a letter — don't activate it for typing.
+            // (Its × button clears the pencil.)
+            if (letterBoxes[index] === '?') {
+                activeBox = null;
+                updateBoxStyles();
+                updateKeyboard();
+                return;
+            }
             // Clicking a soft (ghost) box cycles its filter role: rank-only -> required -> off.
             // While soft letters are ignored the ghost is hidden, so the click must activate the
             // box for typing like any empty box (not silently cycle an invisible mode).
@@ -878,6 +917,10 @@
 
         function handleLetterInput(letter) {
             if (activeBox !== null) {
+                // A pencil holds its square: letters can't land there (clear it first). And a
+                // pencil itself only goes onto an empty square.
+                if (letterBoxes[activeBox] === '?') return;
+                if (letter === '?' && letterBoxes[activeBox] !== '') return;
                 saveUndoState();
                 letterBoxes[activeBox] = letter;
                 softLetters[activeBox] = ''; // typing a hard letter overrides any ghost there
@@ -992,12 +1035,18 @@
                 // Ghosts are hidden while soft letters are being ignored (they're retained, just not drawn).
                 const soft = (!letter && !ignoreSoft) ? softLetters[index] : '';
                 box.style.backgroundColor = '';
-                if (letter) {
+                box.removeAttribute('title');
+                if (letter === '?') {
+                    // Pencil gubbin: shows the sprite, matches anything, locked against typing.
+                    box.innerHTML = PENCIL_IMG;
+                    box.title = 'Held by a pencil — matches any letter. Clear it with ×.';
+                    box.className = `letter-box filled pencil-box fill-color-${index % 7}`;
+                } else if (letter) {
                     box.textContent = letter;
                     const colorIndex = index % 7;
                     box.className = `letter-box filled fill-color-${colorIndex}`;
                 } else if (soft) {
-                    box.textContent = soft;
+                    if (soft === '?') box.innerHTML = PENCIL_IMG; else box.textContent = soft;
                     const mode = softMode[index] || 0;
                     box.className = 'letter-box soft' + (mode === 1 ? ' soft-required' : mode === 2 ? ' soft-off' : '');
                     // translucent version of the position's fill color (dimmer when the ghost is off)
@@ -1498,9 +1547,13 @@
             let html = '';
             for (let i = 0; i < word.length; i++) {
                 const col = colorMap[i];
+                // A saved cell that was held by a pencil keeps its pencil badge — the square is
+                // still a pencil on the board, resolved to this word's letter.
+                const isPencil = savedLetterBoxes && savedLetterBoxes[i] === '?';
+                const inner = word[i].toUpperCase() + (isPencil ? PENCIL_BADGE : '');
                 html += col
-                    ? `<span style="background-color:${darkenHex(col, 16)};padding:0 1px;">${word[i].toUpperCase()}</span>`
-                    : `<span>${word[i].toUpperCase()}</span>`;
+                    ? `<span style="background-color:${darkenHex(col, 16)};padding:0 1px;position:relative;">${inner}</span>`
+                    : `<span${isPencil ? ' style="position:relative;"' : ''}>${inner}</span>`;
             }
             return html;
         }
@@ -1532,7 +1585,8 @@
                 if (partial && blockId) {
                     const blk = requiredBlocks.find(b => b.id === blockId);
                     if (blk) {
-                        const at = blk.text.indexOf(text.toLowerCase());
+                        let at = blk.text.indexOf(text.toLowerCase());
+                        if (at < 0) at = blk.text.indexOf('?'); // the pencil was written as this letter
                         const leftover = at >= 0 ? blk.text.slice(0, at) + blk.text.slice(at + 1) : '';
                         if (leftover) drops.push({ start, letters: leftover });
                     }
@@ -1589,7 +1643,8 @@
             cells.push([positionIdx, letter.toUpperCase()]);
             const block = blockId ? requiredBlocks.find(b => b.id === blockId) : null;
             if (block) {
-                const at = block.text.indexOf(letter.toLowerCase());
+                let at = block.text.indexOf(letter.toLowerCase());
+                if (at < 0) at = block.text.indexOf('?'); // the pencil was written as this letter
                 const leftover = at >= 0 ? block.text.slice(0, at) + block.text.slice(at + 1) : '';
                 requiredBlocks = requiredBlocks.filter(b => b.id !== blockId);
                 updateBlocksList();
@@ -1629,7 +1684,9 @@
                 } else if (hard[i]) {
                     bg = '#cfcabd';
                     border = 'rgba(0,0,0,0.3)';
-                    letter = hard[i].toUpperCase();
+                    letter = hard[i] === '?'
+                        ? '<img src="pencil.png" alt="(pencil)" style="width:11px;height:11px;object-fit:contain;">'
+                        : hard[i].toUpperCase();
                 } else if (soft[i]) {
                     bg = '#e2ddd1';
                     border = 'rgba(0,0,0,0.18)';
@@ -1684,9 +1741,12 @@
             const numPositions = wordLength - bl + 1;
             const counts = new Array(numPositions).fill(0);
             for (const word of candidates) {
-                if (otherBlockTexts.some(t => !word.includes(t))) continue;
+                if (otherBlockTexts.some(t => {
+                    for (let i = 0; i + t.length <= word.length; i++) if (blockMatchesAt(word, t, i)) return false;
+                    return true;
+                })) continue;
                 for (let i = 0; i < numPositions; i++) {
-                    if (word.startsWith(blockText, i)) counts[i]++;
+                    if (blockMatchesAt(word, blockText, i)) counts[i]++;
                 }
             }
             return counts;
@@ -1734,7 +1794,7 @@
                     // Whole-tile use is unavailable once any letter of the block is disabled.
                     if (dis.length === 0) {
                         for (let i = 0; i <= word.length - bl; i++) {
-                            if (!hasFilledInRange(filledPrefix, i, bl) && word.startsWith(block, i)) {
+                            if (!hasFilledInRange(filledPrefix, i, bl) && blockMatchesAt(word, block, i)) {
                                 o.push({ start: i, length: bl, text: block, partial: false });
                             }
                         }
@@ -1743,7 +1803,7 @@
                         const letterSet = new Set();
                         for (let li = 0; li < bl; li++) if (!dis.includes(li)) letterSet.add(block[li]);
                         for (let i = 0; i < word.length; i++) {
-                            if (!hasFilledInRange(filledPrefix, i, 1) && letterSet.has(word[i])) {
+                            if (!hasFilledInRange(filledPrefix, i, 1) && (letterSet.has(word[i]) || letterSet.has('?'))) {
                                 o.push({ start: i, length: 1, text: word[i], partial: true });
                             }
                         }
@@ -2033,14 +2093,14 @@
         document.getElementById('addBlock').addEventListener('click', addBlock);
         document.getElementById('blockInput').addEventListener('keydown', (e) => {
             if (['Backspace','Delete','ArrowLeft','ArrowRight','Home','End','Tab'].includes(e.key)) return;
-            if (/^[a-zA-Z]$/.test(e.key)) return;
+            if (/^[a-zA-Z?]$/.test(e.key)) return; // '?' = pencil (wildcard) letter
             if (e.key === 'Unidentified') return; // mobile: handled by input event
             e.preventDefault();
             addBlock();
         });
         document.getElementById('blockInput').addEventListener('input', (e) => {
             const raw = e.target.value;
-            const clean = raw.replace(/[^a-zA-Z]/g, '');
+            const clean = raw.replace(/[^a-zA-Z?]/g, '');
             e.target.value = clean;
             if (clean !== raw && clean.length > 0) addBlock(); // non-letter typed on mobile → submit
         });
@@ -2064,7 +2124,7 @@
         document.addEventListener('keydown', (e) => {
             const ae = document.activeElement;
             if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
-            if (e.key && e.key.length === 1 && /^[a-zA-Z]$/.test(e.key)) {
+            if (e.key && e.key.length === 1 && /^[a-zA-Z?]$/.test(e.key)) {
                 e.preventDefault();
                 // No box selected and none empty: ignore the stray keystroke rather than overwrite box 1.
                 if (activeBox === null) { const ne = letterBoxes.findIndex(b => b === ''); if (ne === -1) return; moveActiveTo(ne); }
@@ -2122,7 +2182,7 @@
                 // insert all characters (handle multi-letter paste), keep only last char as typed
                 for (let i = 0; i < v.length; i++) {
                     const ch = v[i];
-                    if (/^[a-zA-Z]$/.test(ch)) handleLetterInput(ch.toUpperCase());
+                    if (/^[a-zA-Z?]$/.test(ch)) handleLetterInput(ch.toUpperCase());
                 }
                 e.target.value = '';
             });
