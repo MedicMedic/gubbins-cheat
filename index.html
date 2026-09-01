@@ -12,8 +12,20 @@
     <link href="https://fonts.cdnfonts.com/css/banana-grotesk" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Coming+Soon&display=swap" rel="stylesheet">
     <style>
+        /* Two font families, declared once: hand-drawn for labels/instructions, grotesk for
+           anything tile- or data-like (letters, chips, counts, meta). Use the variables —
+           never restate the stacks. */
+        :root {
+            --font-hand: 'Coming Soon', cursive;
+            --font-grotesk: 'Banana Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        }
         /* Use Coming Soon for most UI text; exclude letter boxes and results. Defer large background images for performance */
-        body { font-family: 'Coming Soon', cursive; background-color: transparent !important; text-transform: uppercase !important; }
+        body { font-family: var(--font-hand); background-color: transparent !important; text-transform: uppercase !important; }
+        /* Form controls don't inherit fonts by default — without this they render in the
+           browser's default font instead of the page's. */
+        input, select, button, textarea { font-family: inherit; }
+        /* The block input takes tile letters, so it matches the tiles, not the labels */
+        #blockInput { font-family: var(--font-grotesk); text-transform: uppercase; letter-spacing: 0.08em; }
         /* Letter boxes: fluid grid — all boxes in one row */
         #letterBoxes {
             display: grid;
@@ -25,7 +37,7 @@
         .letter-box {
             width: 100%;
             aspect-ratio: 1;
-            font-family: 'Banana Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+            font-family: var(--font-grotesk);
             border: 2px solid #000000;
             border-radius: 0;
             background-color: #e6e2d6;
@@ -143,7 +155,7 @@
         .pencil-mark img { width: 100%; height: 100%; object-fit: contain; }
         .pencil-cell { background-color: rgba(218, 134, 10, 0.35); border: 1px dashed rgba(0,0,0,0.5) !important; }
         .clear-blocks-btn .icon img { width: 1.15em; height: 1.15em; object-fit: contain; }
-        .required-block { border: 2px solid #000; border-radius: 0; color: #000; padding: 0.55rem 0.55rem; font-size: 2rem; display: inline-flex; align-items: center; gap: 0.5rem; text-transform: uppercase; letter-spacing: 0.12em; font-family: 'Banana Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
+        .required-block { border: 2px solid #000; border-radius: 0; color: #000; padding: 0.55rem 0.55rem; font-size: 2rem; display: inline-flex; align-items: center; gap: 0.5rem; text-transform: uppercase; letter-spacing: 0.12em; font-family: var(--font-grotesk); }
 
         .clear-blocks-btn { background: #e6bda1; border: 2px solid #000; color: #000; display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.15rem 0.25rem; width: 42px; overflow: hidden; white-space: nowrap; cursor: pointer; transition: width 180ms ease, background 120ms; font-size: 1.25rem; }
             .clear-blocks-btn { background: #e6bda1; border: 2px solid #000; color: #000; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.15rem 0.25rem; width: 42px; overflow: hidden; white-space: nowrap; cursor: pointer; transition: width 180ms ease, background 120ms, justify-content 120ms ease, padding-left 120ms ease; font-size: 1.25rem; }
@@ -152,8 +164,8 @@
             .clear-blocks-btn:hover .label { display: inline-block; }
 
         /* Results should use Banana Grotesk */
-        #resultsContainer, #resultsContainer * { font-family: 'Banana Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
-        .result-tile { text-transform: uppercase; letter-spacing: 0.18em; font-family: 'Banana Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; color: #000; }
+        #resultsContainer, #resultsContainer * { font-family: var(--font-grotesk); }
+        .result-tile { text-transform: uppercase; letter-spacing: 0.18em; font-family: var(--font-grotesk); color: #000; }
         /* Make UI angular and add black borders */
         .rounded-xl, .rounded-lg, .rounded, .rounded-md, .rounded-full { border-radius: 0 !important; }
         .inner-card { border: 2px solid #000 !important; }
@@ -173,9 +185,9 @@
         .block-letter:hover { background: rgba(0,0,0,0.14); }
         .block-letter-off { opacity: 0.32; text-decoration: line-through; text-decoration-thickness: 2px; }
         /* Disable/enable pill on the Position Analysis partial-use rows */
-        .pa-letter-toggle { cursor: pointer; font-family: 'Banana Grotesk', sans-serif; font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #777; border: 1px solid rgba(0,0,0,0.28); border-radius: 999px; padding: 1px 7px; margin-left: 6px; white-space: nowrap; }
+        .pa-letter-toggle { cursor: pointer; font-family: var(--font-grotesk); font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #777; border: 1px solid rgba(0,0,0,0.28); border-radius: 999px; padding: 1px 7px; margin-left: 6px; white-space: nowrap; }
         .pa-letter-toggle:hover { background: rgba(0,0,0,0.07); color: #333; }
-        .pa-partial-disabled { display: flex; align-items: center; gap: 4px; font-family: 'Banana Grotesk', sans-serif; font-size: 0.73rem; color: #999; margin-bottom: 10px; }
+        .pa-partial-disabled { display: flex; align-items: center; gap: 4px; font-family: var(--font-grotesk); font-size: 0.73rem; color: #999; margin-bottom: 10px; }
 
         /* Save button on result tiles */
         .save-word-btn {
@@ -210,7 +222,7 @@
             border-right: 2px solid #000 !important;
             cursor: pointer;
             text-align: left;
-            font-family: 'Banana Grotesk', system-ui, sans-serif;
+            font-family: var(--font-grotesk);
             transition: background 100ms;
         }
         .restore-saved-btn:hover { background: #e9bba4; }
@@ -224,7 +236,7 @@
             color: #555;
             letter-spacing: 0.05em;
             margin-top: 2px;
-            font-family: 'Banana Grotesk', system-ui, sans-serif;
+            font-family: var(--font-grotesk);
         }
         .remove-saved-btn {
             width: 34px;
@@ -240,6 +252,28 @@
             color: #000;
         }
         .remove-saved-btn:hover { background: #e6bda1; }
+        /* Completed saved words: auto-collapsed into a fold at the bottom of the panel */
+        .saved-word-done { opacity: 0.6; }
+        .saved-word-done:hover { opacity: 1; }
+        .completed-saved-toggle {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: none;
+            border: 2px dashed rgba(0,0,0,0.35) !important;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-family: var(--font-grotesk);
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: #555;
+            text-align: left;
+            transition: background 100ms;
+        }
+        .completed-saved-toggle:hover { background: rgba(0,0,0,0.05); }
+        /* The game's own angular tick (TickSprite), used instead of a ✓ character */
+        .tick-img { width: 0.95em; height: 0.95em; object-fit: contain; display: inline-block; vertical-align: -0.08em; }
 
         /* Remove word button on result tiles */
         .remove-word-btn {
@@ -314,7 +348,7 @@
             <div id="posAnalysisSection" class="mb-5 p-3" style="display: none; background-color: #eff0ea;">
                 <div class="flex items-center justify-between mb-2">
                     <label class="block text-sm font-semibold text-gray-700">Position Analysis</label>
-                    <button id="posAnalysisToggle" type="button" onclick="togglePositionAnalysis()" title="Collapse" style="background:none;border:2px solid #000!important;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1rem;font-weight:700;line-height:1;padding:0;font-family:'Banana Grotesk',sans-serif;">−</button>
+                    <button id="posAnalysisToggle" type="button" onclick="togglePositionAnalysis()" title="Collapse" style="background:none;border:2px solid #000!important;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1rem;font-weight:700;line-height:1;padding:0;font-family:var(--font-grotesk);">−</button>
                 </div>
                 <div id="posAnalysisResults"></div>
             </div>
@@ -324,7 +358,7 @@
                 <div class="flex items-center justify-between mb-2">
                     <label class="block text-sm font-semibold text-gray-700">Saved Words <span id="savedWordsBadge" class="text-gray-400 font-normal text-xs"></span></label>
                     <div class="flex gap-2">
-                        <button id="savedWordsToggle" type="button" onclick="toggleSavedWords()" title="Collapse" style="background:none;border:2px solid #000!important;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1rem;font-weight:700;line-height:1;padding:0;font-family:'Banana Grotesk',sans-serif;">−</button>
+                        <button id="savedWordsToggle" type="button" onclick="toggleSavedWords()" title="Collapse" style="background:none;border:2px solid #000!important;width:26px;height:26px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1rem;font-weight:700;line-height:1;padding:0;font-family:var(--font-grotesk);">−</button>
                         <button id="clearSavedAll" class="clear-blocks-btn" title="Clear all saved words"><span class="icon">×</span><span class="label">Clear All</span></button>
                     </div>
                 </div>
@@ -339,8 +373,8 @@
                         <span class="text-base font-normal text-gray-500 ml-1">(<span id="resultCount">0</span> <span id="resultWord">words</span>)</span>
                     </h2>
                     <div class="flex items-center gap-3 flex-wrap">
-                        <span id="hiddenWordsNotice" style="display:none; font-family:'Banana Grotesk',sans-serif; font-size:0.75rem; color:#888;">
-                            <button type="button" onclick="toggleHiddenWordsList()" style="background:none;border:none!important;color:#888;cursor:pointer;font-size:0.75rem;padding:0;font-family:'Banana Grotesk',sans-serif;"><span id="hiddenWordsCount">0</span> hidden ▾</button>
+                        <span id="hiddenWordsNotice" style="display:none; font-family:var(--font-grotesk); font-size:0.75rem; color:#888;">
+                            <button type="button" onclick="toggleHiddenWordsList()" style="background:none;border:none!important;color:#888;cursor:pointer;font-size:0.75rem;padding:0;font-family:var(--font-grotesk);"><span id="hiddenWordsCount">0</span> hidden ▾</button>
                         </span>
                         <label id="ignoreSoftWrap" class="text-sm text-gray-600 flex items-center gap-2" title="Ignore soft (ghost) letters entirely — no ranking boost and no filtering. The ghosts stay visible so you can flip this back on.">
                             <input type="checkbox" id="ignoreSoftLetters" />
@@ -421,6 +455,7 @@
         const pendingRemovals = new Set();
         let bestPositionCombo = null; // [{blockIndex, start(0-indexed)}] from latest analysis
         let savedWordsExpanded = true;
+        let completedSavedExpanded = false; // the "completed" group starts collapsed every load
         let _undoStack = [];      // snapshots, oldest first; in-memory only (a refresh clears it)
         const MAX_UNDO_STEPS = 30;
 
@@ -1309,15 +1344,15 @@
                 notice.style.display = '';
                 if (listEl && listEl.style.display !== 'none') {
                     const wordChips = [...removedWords].sort().map(w =>
-                        `<span style="display:inline-flex;align-items:center;gap:2px;border:2px solid #000;padding:2px 6px;background:#fff;font-family:'Banana Grotesk',sans-serif;font-size:0.75rem;letter-spacing:0.08em;">
+                        `<span style="display:inline-flex;align-items:center;gap:2px;border:2px solid #000;padding:2px 6px;background:#fff;font-family:var(--font-grotesk);font-size:0.75rem;letter-spacing:0.08em;">
                             ${w.toUpperCase()}
                             <button type="button" onclick="restoreWord('${w}')" title="Restore" style="background:none;border:none!important;color:#189973;cursor:pointer;font-size:0.9rem;padding:0 2px;line-height:1;">↩</button>
                         </span>`
                     ).join('');
                     listEl.innerHTML = `<div style="width:100%;display:flex;gap:8px;align-items:center;margin-bottom:6px;padding-bottom:5px;border-bottom:1px solid #ccc;">
-                        <button type="button" onclick="restoreAllRemovedWords()" style="background:none;border:none!important;color:#189973;cursor:pointer;font-size:0.75rem;padding:0;font-family:'Banana Grotesk',sans-serif;text-decoration:underline;">restore all</button>
+                        <button type="button" onclick="restoreAllRemovedWords()" style="background:none;border:none!important;color:#189973;cursor:pointer;font-size:0.75rem;padding:0;font-family:var(--font-grotesk);text-decoration:underline;">restore all</button>
                         <span style="color:#ccc;">·</span>
-                        <button type="button" onclick="copyHiddenWordsList()" style="background:none;border:none!important;color:#888;cursor:pointer;font-size:0.75rem;padding:0;font-family:'Banana Grotesk',sans-serif;text-decoration:underline;">copy list</button>
+                        <button type="button" onclick="copyHiddenWordsList()" style="background:none;border:none!important;color:#888;cursor:pointer;font-size:0.75rem;padding:0;font-family:var(--font-grotesk);text-decoration:underline;">copy list</button>
                     </div>` + wordChips;
                 }
             } else {
@@ -1697,10 +1732,45 @@
                     border = 'rgba(0,0,0,0.1)';
                     letter = '';
                 }
-                html += `<span style="width:15px;height:15px;background:${bg};display:inline-flex;align-items:center;justify-content:center;border:1px solid ${border};font-family:'Banana Grotesk',sans-serif;font-size:8px;font-weight:700;line-height:1;${style}">${letter}</span>`;
+                html += `<span style="width:15px;height:15px;background:${bg};display:inline-flex;align-items:center;justify-content:center;border:1px solid ${border};font-family:var(--font-grotesk);font-size:8px;font-weight:700;line-height:1;${style}">${letter}</span>`;
             }
             html += `</span>`;
             return html;
+        }
+
+        // A saved word is "complete" when every one of its cells is accounted for — covered by a
+        // letter that was on the board when it was saved (pencils count) or by a block placement.
+        // Computed live each render, never stored: re-saving the word with letters removed makes
+        // it incomplete again and it moves back up into the active list.
+        function savedWordComplete(saved) {
+            const covered = Array(saved.word.length).fill(false);
+            const boxes = saved.letterBoxes || [];
+            for (let i = 0; i < Math.min(boxes.length, covered.length); i++) if (boxes[i]) covered[i] = true;
+            for (const p of (saved.placements || [])) {
+                for (let i = Math.max(0, p.start); i < Math.min(p.start + p.length, covered.length); i++) covered[i] = true;
+            }
+            return covered.every(Boolean);
+        }
+
+        function toggleCompletedSaved() {
+            completedSavedExpanded = !completedSavedExpanded;
+            updateSavedWordsPanel();
+        }
+
+        function renderSavedItem(saved, done) {
+            const wordHtml = renderSavedWordHtml(saved.word, saved.placements, saved.blocks, saved.letterBoxes);
+            const preview = renderPositionPreview(saved.wordLength, (saved.placements || []).map(p => ({
+                start: p.start, length: p.length,
+                color: (saved.blocks[p.blockIndex] || {}).color || '#ccc',
+                text: saved.word.substring(p.start, p.start + p.length)
+            })));
+            return `<div class="saved-word-item${done ? ' saved-word-done' : ''}">
+                <button type="button" class="restore-saved-btn" onclick="restoreSavedWord('${saved.id}')">
+                    <span class="saved-word-text">${wordHtml}</span>
+                    <span class="saved-word-meta" style="display:flex;align-items:center;gap:4px;margin-top:3px;">${done ? '<img src="tick.png" alt="complete" class="tick-img">' : ''}${preview}</span>
+                </button>
+                <button type="button" class="remove-saved-btn" onclick="removeSavedWord('${saved.id}')" title="Remove">×</button>
+            </div>`;
         }
 
         function updateSavedWordsPanel() {
@@ -1708,25 +1778,29 @@
             const badge = document.getElementById('savedWordsBadge');
             const list = document.getElementById('savedWordsList');
             if (!section) return;
-            if (badge) badge.textContent = savedWords.length ? `(${savedWords.length})` : '';
-            if (savedWords.length === 0) { section.style.display = 'none'; return; }
+            if (savedWords.length === 0) {
+                if (badge) badge.textContent = '';
+                section.style.display = 'none';
+                return;
+            }
+            // Completed words auto-collapse out of the way: they stay saved (and restorable),
+            // just grouped under a fold at the bottom instead of cluttering the working list.
+            const activeEntries = savedWords.filter(s => !savedWordComplete(s));
+            const doneEntries = savedWords.filter(s => savedWordComplete(s));
+            if (badge) badge.textContent = doneEntries.length
+                ? `(${activeEntries.length} + ${doneEntries.length} completed)`
+                : `(${savedWords.length})`;
             section.style.display = '';
             list.style.display = savedWordsExpanded ? '' : 'none';
-            list.innerHTML = savedWords.map(saved => {
-                const wordHtml = renderSavedWordHtml(saved.word, saved.placements, saved.blocks, saved.letterBoxes);
-                const preview = renderPositionPreview(saved.wordLength, (saved.placements || []).map(p => ({
-                    start: p.start, length: p.length,
-                    color: (saved.blocks[p.blockIndex] || {}).color || '#ccc',
-                    text: saved.word.substring(p.start, p.start + p.length)
-                })));
-                return `<div class="saved-word-item">
-                    <button type="button" class="restore-saved-btn" onclick="restoreSavedWord('${saved.id}')">
-                        <span class="saved-word-text">${wordHtml}</span>
-                        <span class="saved-word-meta" style="display:flex;align-items:center;gap:4px;margin-top:3px;">${preview}</span>
-                    </button>
-                    <button type="button" class="remove-saved-btn" onclick="removeSavedWord('${saved.id}')" title="Remove">×</button>
-                </div>`;
-            }).join('');
+            let html = activeEntries.map(s => renderSavedItem(s, false)).join('');
+            if (doneEntries.length) {
+                html += `<button type="button" class="completed-saved-toggle" onclick="toggleCompletedSaved()">
+                    <span style="width:9px;display:inline-block;transition:transform 100ms;transform:rotate(${completedSavedExpanded ? 90 : 0}deg);">▸</span>
+                    <img src="tick.png" alt="" class="tick-img"> ${doneEntries.length} completed word${doneEntries.length === 1 ? '' : 's'}
+                </button>`;
+                if (completedSavedExpanded) html += doneEntries.map(s => renderSavedItem(s, true)).join('');
+            }
+            list.innerHTML = html;
         }
 
         // Count words in candidates that have blockText starting at each position,
@@ -1858,7 +1932,7 @@
         }
 
         function renderBlockChip(block) {
-            return `<span style="background-color:${block.color};padding:1px 6px;border:1px solid rgba(0,0,0,0.25);font-family:'Banana Grotesk',sans-serif;">${block.text.toUpperCase()}</span>`;
+            return `<span style="background-color:${block.color};padding:1px 6px;border:1px solid rgba(0,0,0,0.25);font-family:var(--font-grotesk);">${block.text.toUpperCase()}</span>`;
         }
 
         // One "best position" bar chart. `clickFn`/`clickArg`(/`clickArg2`) build the per-bar onclick:
@@ -1869,7 +1943,7 @@
             if (max <= 0) return '';
             const bestPos = counts.findIndex(c => c === max) + 1;
             let html = `<div style="margin-bottom:14px;">
-                <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.78rem;font-weight:700;letter-spacing:0.08em;margin-bottom:6px;">
+                <div style="font-family:var(--font-grotesk);font-size:0.78rem;font-weight:700;letter-spacing:0.08em;margin-bottom:6px;">
                     ${chipHtml} &mdash; best at position ${bestPos}
                     <span style="font-weight:400;color:#555;">(${max.toLocaleString()} / ${total.toLocaleString()} words)</span>
                 </div>
@@ -1886,9 +1960,9 @@
                     ? `onclick="${clickFn}('${clickArg}', ${extraArg}${i})" onmouseover="this.style.background='rgba(0,0,0,0.06)'" onmouseout="this.style.background=''"`
                     : `title="not placeable here"`;
                 html += `<div ${clickAttrs} style="display:flex;flex-direction:column;align-items:center;gap:2px;min-width:30px;cursor:${counts[i] > 0 ? 'pointer' : 'default'};">
-                    <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.58rem;color:#444;line-height:1;">${counts[i].toLocaleString()}</div>
+                    <div style="font-family:var(--font-grotesk);font-size:0.58rem;color:#444;line-height:1;">${counts[i].toLocaleString()}</div>
                     <div style="width:28px;height:${barH}px;background-color:${color};opacity:${opacity};border:${border};flex-shrink:0;"></div>
-                    <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.65rem;font-weight:${isBest ? '700' : '400'};line-height:1;">${i + 1}</div>
+                    <div style="font-family:var(--font-grotesk);font-size:0.65rem;font-weight:${isBest ? '700' : '400'};line-height:1;">${i + 1}</div>
                 </div>`;
             }
             html += `</div></div>`;
@@ -1986,7 +2060,7 @@
                     sortedGroups.forEach(([letters, combos]) => {
                         const isTop = letters === topLetters;
                         html += `<div style="margin-bottom:16px;">
-                            <div style="font-family:'Banana Grotesk',sans-serif;font-size:0.75rem;font-weight:700;letter-spacing:0.06em;margin-bottom:5px;color:${isTop ? '#000' : '#666'};">
+                            <div style="font-family:var(--font-grotesk);font-size:0.75rem;font-weight:700;letter-spacing:0.06em;margin-bottom:5px;color:${isTop ? '#000' : '#666'};">
                                 ${letters} letters
                             </div>
                             <div style="display:flex;flex-direction:column;gap:4px;">`;
@@ -1999,9 +2073,9 @@
                             _positionCombos.push(combo.placements.map((p, pi) => ({ start: p.start, text: p.text, blockId: combo.blocks[pi].id, partial: p.partial })));
                             // Chip per block — partial uses show "X of BLOCK" so it's clear only one letter lands.
                             const chips = combo.placements.map((p, pi) => p.partial
-                                ? `<span style="background-color:${combo.blocks[pi].color};padding:1px 6px;border:1px dashed rgba(0,0,0,0.5);font-style:italic;font-family:'Banana Grotesk',sans-serif;">${p.text.toUpperCase()}</span><span style="font-weight:400;color:#888;font-size:0.7rem;"> of ${combo.blocks[pi].text.toUpperCase()}</span>`
+                                ? `<span style="background-color:${combo.blocks[pi].color};padding:1px 6px;border:1px dashed rgba(0,0,0,0.5);font-style:italic;font-family:var(--font-grotesk);">${p.text.toUpperCase()}</span><span style="font-weight:400;color:#888;font-size:0.7rem;"> of ${combo.blocks[pi].text.toUpperCase()}</span>`
                                 : renderBlockChip(combo.blocks[pi])).join(' ');
-                            html += `<div onclick="applyPositionCombo(${comboIdx})" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-family:'Banana Grotesk',sans-serif;font-size:0.73rem;cursor:pointer;padding:3px 4px;transition:background 100ms;${i === 0 && isTop ? 'font-weight:700;' : 'color:#555;'}" onmouseover="this.style.background='rgba(0,0,0,0.04)'" onmouseout="this.style.background=''">
+                            html += `<div onclick="applyPositionCombo(${comboIdx})" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-family:var(--font-grotesk);font-size:0.73rem;cursor:pointer;padding:3px 4px;transition:background 100ms;${i === 0 && isTop ? 'font-weight:700;' : 'color:#555;'}" onmouseover="this.style.background='rgba(0,0,0,0.04)'" onmouseout="this.style.background=''">
                                 ${chips} ${renderPositionPreview(wordLength, prevPlacements, boardRow)}
                                 <span style="color:#888;font-weight:400;">${combo.count.toLocaleString()} words</span>
                             </div>`;
@@ -2039,7 +2113,7 @@
                         const positions = [];
                         for (let k = 0; k < block.text.length; k++) if (block.text[k] === ch) positions.push(k);
                         const chDisabled = positions.every(k => disabled.includes(k));
-                        const chipBase = `<span style="background-color:${block.color};padding:1px 6px;border:1px solid rgba(0,0,0,0.25);font-family:'Banana Grotesk',sans-serif;${chDisabled ? 'opacity:0.4;text-decoration:line-through;' : ''}">${ch.toUpperCase()}</span><span style="font-weight:400;color:#888;font-size:0.7rem;"> of ${block.text.toUpperCase()}</span>`;
+                        const chipBase = `<span style="background-color:${block.color};padding:1px 6px;border:1px solid rgba(0,0,0,0.25);font-family:var(--font-grotesk);${chDisabled ? 'opacity:0.4;text-decoration:line-through;' : ''}">${ch.toUpperCase()}</span><span style="font-weight:400;color:#888;font-size:0.7rem;"> of ${block.text.toUpperCase()}</span>`;
                         if (chDisabled) {
                             const enableBtn = `<span class="pa-letter-toggle" onclick="setBlockLetterDisabled('${block.id}','${ch}',false)" title="use this letter again">enable</span>`;
                             partialBars += `<div class="pa-partial-disabled">${chipBase} &mdash; disabled ${enableBtn}</div>`;
@@ -2060,12 +2134,12 @@
 
                 let blockHtml = wholeBars
                     ? wholeBars
-                    : `<div style="font-family:'Banana Grotesk',sans-serif;font-size:0.78rem;font-weight:700;margin-bottom:6px;">${renderBlockChip(block)} <span style="font-weight:400;color:#888;">&mdash; no whole-tile placement</span></div>`;
+                    : `<div style="font-family:var(--font-grotesk);font-size:0.78rem;font-weight:700;margin-bottom:6px;">${renderBlockChip(block)} <span style="font-weight:400;color:#888;">&mdash; no whole-tile placement</span></div>`;
                 // Partial single-letter uses live in their own collapsed accordion.
                 if (partialBars) {
                     const expanded = paExpandedBlocks.has(block.id);
                     blockHtml += `<div style="margin-top:2px;">
-                        <div onclick="togglePABlock('${block.id}')" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:5px 2px;font-family:'Banana Grotesk',sans-serif;font-size:0.72rem;font-weight:600;color:#666;" onmouseover="this.style.background='rgba(0,0,0,0.03)'" onmouseout="this.style.background=''">
+                        <div onclick="togglePABlock('${block.id}')" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:5px 2px;font-family:var(--font-grotesk);font-size:0.72rem;font-weight:600;color:#666;" onmouseover="this.style.background='rgba(0,0,0,0.03)'" onmouseout="this.style.background=''">
                             <span style="width:9px;display:inline-block;transition:transform 100ms;transform:rotate(${expanded ? 90 : 0}deg);">▸</span>
                             partial use &mdash; a single letter of ${renderBlockChip(block)}
                         </div>

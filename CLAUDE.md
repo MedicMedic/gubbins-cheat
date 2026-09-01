@@ -26,10 +26,11 @@ the app on launch. To pull and regenerate:
 (env=`dev`, bucket=`48d9bd7d-2c77-4798-b58c-922156393430`, badge=`latest` may change with
 game updates — re-read `settings.json` from a freshly pulled APK if the fetch 404s.)
 
-## Game art (pencil.png)
+## Game art (pencil.png, tick.png)
 
-`pencil.png` is the actual in-game pencil gubbin sprite (`Gubbin_Pencil_Small_Idle_0001Sprite`),
-extracted 2026-09-01. The game's art is SVG-imported **vector sprites** (tessellated meshes with
+`pencil.png` is the actual in-game pencil gubbin sprite (`Gubbin_Pencil_Small_Idle_0001Sprite`)
+and `tick.png` is the game's angular checkmark (`TickSprite`; `Icon_TickSprite` is a thinner
+rounded variant), both extracted 2026-09-01. The game's art is SVG-imported **vector sprites** (tessellated meshes with
 per-vertex colors, no Texture2D), so UnityPy's `.image` fails with `PPtr ... m_PathID == 0`.
 To extract more art:
 
